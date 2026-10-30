@@ -1,6 +1,6 @@
 # Security
 
-This policy covers the code in this repository: the `@rivi-software/*` packages on npm, the [rivi-bot](rivi-bot) GitHub Action, and the workflows that test, review and release them.
+This policy covers the code in this repository: the `@rivi-software/*` packages on npm, the [rivi-bot](rivi-bot) GitHub Action and its reusable workflow, and the workflows that test, review and release them.
 
 ## Reporting a vulnerability
 

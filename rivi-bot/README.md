@@ -2,7 +2,7 @@
 
 A pull request review by Claude, as a GitHub Action. A maintainer asks for a review, and Claude reads the pull request at that one commit, with read-only tools. It then posts one review: an inline comment for each finding and a short summary, pinned to the commit it read. A later review of the same pull request reads only what changed since.
 
-RIVI Software runs it as RIVI Bot on its own repositories, this one included ([the workflow](../.github/workflows/rivi-bot.yml)). A pull request by someone with write access is reviewed when it opens and after every push, and may be approved. Any other pull request is reviewed once a maintainer adds the `rivi-bot:review` label, and after every push while the label stays on. Those reviews only comment.
+RIVI Software runs it as RIVI Bot on its own repositories, through [a reusable workflow](../.github/workflows/rivi-bot.yml) that any repository can call. A pull request by someone with write access is reviewed when it opens and after every push, and may be approved. Any other pull request is reviewed once a maintainer adds the `rivi-bot:review` label, and after every push while the label stays on. Those reviews only comment.
 
 ## What the review does
 
@@ -41,14 +41,49 @@ The action is built to review pull requests from anyone, once a maintainer appro
   - No step of the action runs a file from the workspace.
 - **One commit.** The review reads `head-sha`, the commit the maintainer approved, and nothing pushed after it.
 - **Prompt injection.** Claude is told that what the pull request contains is material under review, never instructions. Text in a pull request can still steer what a review says, so the review comments rather than approves unless you set `approve: true`.
-- **The gate is yours.** On `pull_request_target`, a workflow has your secrets for pull requests from forks. Run the action on an outside pull request only after a maintainer approves (a label, as below, or an environment with required reviewers), never as soon as it opens. An approval can be good for one review, or stand until a maintainer takes it back, so that later pushes are reviewed too. A standing approval means each push spends up to a follow-up's budget on code nobody has read yet, so keep `approve` off for those pull requests.
+- **The gate.** On `pull_request_target`, a workflow has your secrets for pull requests from forks. The reusable workflow reviews an outside pull request only after a maintainer adds the label. If you run the action yourself, run it on an outside pull request only after a maintainer approves (a label, as below, or an environment with required reviewers), never as soon as it opens. An approval can be good for one review, or stand until a maintainer takes it back, so that later pushes are reviewed too. A standing approval means each push spends up to a follow-up's budget on code nobody has read yet, so keep `approve` off for those pull requests.
 
 ## Setup
 
 1. Add an Anthropic API key as an Actions secret, such as `ANTHROPIC_REVIEW_API_KEY`. Use a key from a workspace with a spend limit.
-2. Create the label that approves a review, such as `rivi-bot:review`. Adding a label needs triage access; the workflow below also checks for write access.
-3. Optionally, use a GitHub App with **Contents: read** and **Pull requests: write**, installed on the repository, so the reviews come from the App instead of `github-actions`. Pass its installation token as `github-token`, and `<app-slug>[bot]` as `reviewer`.
-4. Add the workflow:
+2. Create the `rivi-bot:review` label, which approves the reviews of a pull request. Adding a label needs triage access; the workflow also checks for write access.
+3. Optionally, use a GitHub App with **Contents: read** and **Pull requests: write**, installed on the repository, so the reviews come from the App instead of `github-actions`. Keep its client ID in an Actions variable and its private key in a secret.
+4. Add a workflow that calls the reusable workflow:
+
+```yaml
+name: review
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
+permissions: {}
+jobs:
+  rivi-bot:
+    uses: rivi-software/tools/.github/workflows/rivi-bot.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }} # optional
+    secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
+      app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }} # optional
+```
+
+It reviews a pull request by someone with write access when it opens or leaves draft, and after every push, and lets those reviews approve. Any other pull request waits for a maintainer to add the label. The label stays on, so later pushes are reviewed too, until a maintainer takes it off; those reviews only comment. A push to a draft is not reviewed. [This repository's workflow](../.github/workflows/review.yml) is the same call.
+
+| Workflow input | What |
+| --- | --- |
+| `app-client-id` | The client ID of the App the reviews come from; without it, they come from `github-actions` |
+| `focus` | What else your reviews look for, in a sentence or two |
+
+| Workflow secret | What |
+| --- | --- |
+| `anthropic-api-key` | (required) The key Claude runs on |
+| `app-private-key` | The private key of the App named by `app-client-id` |
+
+### The action on its own
+
+To pin the action, choose its other inputs, or approve reviews your own way, use the action in a workflow of your own. This one reviews a pull request once each time a maintainer adds the label:
 
 ```yaml
 name: review
@@ -87,9 +122,9 @@ jobs:
         run: gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/rivi-bot%3Areview" || true
 ```
 
-Taking the label off makes each approval good for one review: a later push needs a new one. [This repository's workflow](../.github/workflows/rivi-bot.yml) goes further. It leaves the label on and also runs on `synchronize`, so later pushes are reviewed too. It reviews pull requests from people with write access without a label, and lets only those reviews approve.
+Taking the label off makes each approval good for one review: a later push needs a new one. With an App, pass its installation token as `github-token`, and `<app-slug>[bot]` as `reviewer`.
 
-## Inputs
+## Action inputs
 
 | Input | Default | What |
 | --- | --- | --- |
@@ -110,7 +145,7 @@ The action runs on GitHub's Linux runners, which come with `gh`, `jq` and `git`.
 
 ## Versions
 
-Pin the action to a commit SHA, or to a `rivi-bot-v*` tag cut from `main`. It is versioned by tag, not published to npm.
+Pin the action or the reusable workflow to a commit SHA, or to a `rivi-bot-v*` tag cut from `main`. They are versioned by tag, not published to npm. The reusable workflow runs the action from `main` at any ref: pin the action itself to fix the review's version.
 
 ## License
 

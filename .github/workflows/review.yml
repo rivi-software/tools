@@ -1,0 +1,23 @@
+name: review
+
+# rivi-bot reviews this repository's pull requests: the reusable workflow in rivi-bot.yml, which
+# says when. `./` runs it from the same commit as this file, and pull_request_target takes that
+# from main: never the pull request's version. Other repositories call it as
+# rivi-software/tools/.github/workflows/rivi-bot.yml@main (rivi-bot/README.md#setup).
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
+
+permissions: {}
+
+jobs:
+  rivi-bot:
+    uses: ./.github/workflows/rivi-bot.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+    secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
+      app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
