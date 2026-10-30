@@ -24,6 +24,11 @@ updates:
     commit-message:
       prefix: chore
       include: scope
+    ignore:
+      # @types/node follows the oldest Node the packages support (22), so type-checking catches an
+      # API that Node 22 lacks; its next major comes with raising that floor.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       development:
         dependency-type: development
