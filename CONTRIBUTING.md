@@ -68,12 +68,12 @@ You may use AI tools to write an issue or a pull request, and you are its author
 
 A new package starts with an issue, like any change bigger than a fix.
 
-Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app.
+Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app. Add it to the table of packages in the root README.
 
 ```text
 packages/<name>/
   LICENSE              a copy of the root LICENSE: npm ships only the package's own
-  README.md            what it does, install, usage, how it works, its exports
+  README.md            what it does, install, usage, how it works, limits, exports, development
   package.json
   tsconfig.json
   tsconfig.build.json
