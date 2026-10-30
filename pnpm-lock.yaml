@@ -188,6 +188,20 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1))
 
+  packages/cloudflare-deploy: {}
+
+  packages/deploy-watch:
+    devDependencies:
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      react:
+        specifier: 19.3.1
+        version: 19.3.1
+      vite:
+        specifier: 8.3.5
+        version: 8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1)
+
   packages/posthog-tanstack-start:
     devDependencies:
       '@posthog/rollup-plugin':
@@ -201,7 +215,7 @@ importers:
         version: 1.169.4(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.15)(rollup@4.66.0)(supports-color@7.2.0)(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1))
       posthog-js:
         specifier: 1.438.21
-        version: 1.438.21(react@19.3.1)
+        version: 1.438.21(@types/react@19.3.0)(react@19.3.1)
       posthog-node:
         specifier: 5.57.1
         version: 5.57.1
@@ -215,11 +229,13 @@ importers:
         specifier: 8.3.5
         version: 8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1)
 
+  packages/semgrep-github-report: {}
+
   packages/vite-plugin-zod-jitless:
     devDependencies:
       vite:
         specifier: 8.3.5
-        version: 8.3.5(@types/node@22.20.5)(yaml@2.9.1)
+        version: 8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1)
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -1097,6 +1113,9 @@ packages:
   '@types/node@22.20.5':
     resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
 
+  '@types/react@19.3.0':
+    resolution: {integrity: sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==}
+
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
@@ -1342,6 +1361,9 @@ packages:
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
+
+  csstype@3.2.3:
+    resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -2846,6 +2868,10 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
+  '@types/react@19.3.0':
+    dependencies:
+      csstype: 3.2.3
+
   '@types/trusted-types@2.0.7':
     optional: true
 
@@ -3020,6 +3046,8 @@ snapshots:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
+
+  csstype@3.2.3: {}
 
   debug@4.4.3(supports-color@7.2.0):
     dependencies:
@@ -3286,7 +3314,7 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.2
 
-  posthog-js@1.438.21(react@19.3.1):
+  posthog-js@1.438.21(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       '@posthog/browser-common': 0.9.12
       '@posthog/core': 1.61.2
@@ -3299,6 +3327,7 @@ snapshots:
       web-vitals: 6.2.3
       web-vitals-soft-navs: web-vitals@6.2.1
     optionalDependencies:
+      '@types/react': 19.3.0
       react: 19.3.1
     transitivePeerDependencies:
       - preact-render-to-string
