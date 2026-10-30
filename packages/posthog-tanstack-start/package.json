@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/posthog-tanstack-start",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PostHog error tracking for TanStack Start apps on Cloudflare Workers: the Worker's capture, the Start middlewares, the browser SDK loaded after hydration, secret-path redaction and the source map upload",
   "license": "MIT",
   "type": "module",

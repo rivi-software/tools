@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/vite-plugin-zod-jitless",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vite plugin that sets Zod's jitless mode before any browser module builds a schema, so a strict Content-Security-Policy never sees Zod's eval probe",
   "keywords": ["vite", "vite-plugin", "zod", "csp", "content-security-policy", "unsafe-eval"],
   "license": "MIT",
