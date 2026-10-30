@@ -68,12 +68,13 @@ To report errors, report only what stays: `recoverFromChunkError(error).then((re
 
 - **The build's id.** The Vite plugin gives each build the commit CI builds: `WORKERS_CI_COMMIT_SHA` on Cloudflare Workers Builds, GitHub's `GITHUB_SHA` otherwise, or the `buildId` option.
   - The server bundle gets the id as a define.
-  - The browser's assets get `/build.json` (`{ "id": "<commit>" }`), served as a static file.
-  - The browser bundle never holds the id, so a commit that changes no browser code renames no chunk, and two builds of one commit stay byte for byte the same.
+  - The browser's assets get `build.json` (`{ "id": "<commit>" }`), served as a static file under Vite's `base`: `/build.json`, or `/app/build.json` with `base: "/app/"`.
+  - The browser bundle never holds the id, so a commit that changes no browser code renames no chunk, and two builds of one commit stay byte for byte the same. It only learns where `build.json` is.
+  - A relative `base` (`./`) or a `base` on another host names no fixed path, so name it yourself: `startDeployWatch({ buildFile: "/where/build.json" })`.
   - The plugin also bundles this package into server builds (`resolve.noExternal`): a define reaches only bundled code, and Vite leaves dependencies external there by default.
   - The dev server and a local build have no id, and nothing runs.
 - **The page's id.** `BuildMeta` renders `<meta name="deploy-watch-build">` in the document's head on the server. In the browser it reads the tag back, so hydration matches.
-- **The check.** `startDeployWatch()` reads `/build.json` (`no-store`):
+- **The check.** `startDeployWatch()` reads `build.json` (`no-store`):
   - when the tab comes back into view or gets focus, at most once a minute
   - every ten minutes while it is visible
   - after a back/forward-cache restore
@@ -142,9 +143,9 @@ ClientRouter remembers the scripts it ran by address, and a deploy renames every
 
 | Entry point | Contents | Runs in |
 | --- | --- | --- |
-| `@rivi-software/deploy-watch` | `startDeployWatch`, `followNewBuild`, `isNewBuildLive`, `subscribeToNewBuild`, `reloadOntoNewBuild`, `isReloadingOntoNewBuild`, `recoverFromChunkError`, `isChunkLoadError`, `pageBuildId`, `isWatching`, `BUILD_META_NAME`; `createDeployWatch` over injected dependencies | Browser and server (no-ops on the server) |
+| `@rivi-software/deploy-watch` | `startDeployWatch({ buildFile })`, `followNewBuild`, `isNewBuildLive`, `subscribeToNewBuild`, `reloadOntoNewBuild`, `isReloadingOntoNewBuild`, `recoverFromChunkError`, `isChunkLoadError`, `pageBuildId`, `isWatching`, `parseBuildFile`; `createDeployWatch` over injected dependencies; the constants `BUILD_META_NAME`, `BUILD_FILE`, `CHECK_SPACING_MS`, `CHECK_INTERVAL_MS`, `RELOADED_FOR_KEY` and `CHUNK_RETRY_KEY`; the types `StartOptions`, `DeployWatch`, `DeployWatchDeps`, `NavigationEvent` and `NavigationEvents` | Browser and server (no-ops on the server) |
 | `@rivi-software/deploy-watch/react` | `BuildMeta`, `useNewBuildNotice`, `useChunkErrorRecovery` | React, both sides |
-| `@rivi-software/deploy-watch/vite` | `deployWatch({ buildId })`, the Vite plugin | Vite config |
+| `@rivi-software/deploy-watch/vite` | `deployWatch({ buildId })`, the Vite plugin; `buildFileUnder(base)`, where `build.json` is served; `PACKAGE_PATTERN`, what the plugin bundles into server builds; the type `DeployWatchOptions` | Vite config |
 
 ## Development
 

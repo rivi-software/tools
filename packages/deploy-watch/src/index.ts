@@ -20,10 +20,14 @@
  */
 
 declare const __DEPLOY_WATCH_BUILD_ID__: string | undefined;
+declare const __DEPLOY_WATCH_BUILD_FILE__: string | undefined;
 
 /** The `<meta>` the server writes the page's build id into. */
 export const BUILD_META_NAME = "deploy-watch-build";
-/** The live build's id, from the static assets: `{ "id": "<commit>" }`. */
+/**
+ * The live build's id, from the static assets: `{ "id": "<commit>" }`. This is where it is with
+ * Vite's default `base`; the Vite plugin tells the browser where it is under another one.
+ */
 export const BUILD_FILE = "/build.json";
 /** The fewest milliseconds between two checks a tab's own activity starts; a failed chunk checks at once. */
 export const CHECK_SPACING_MS = 60_000;
@@ -213,8 +217,8 @@ export function pageBuildId(): string {
   return document.querySelector<HTMLMetaElement>(`meta[name="${BUILD_META_NAME}"]`)?.content ?? "";
 }
 
-async function fetchLiveBuild(): Promise<string | null> {
-  const response = await fetch(BUILD_FILE, {
+async function fetchLiveBuild(buildFile: string): Promise<string | null> {
+  const response = await fetch(buildFile, {
     cache: "no-store",
     credentials: "omit",
     signal: AbortSignal.timeout(10_000),
@@ -232,17 +236,28 @@ function sessionStore(): SessionStore | null {
 
 let watch: DeployWatch | null = null;
 
+export type StartOptions = {
+  /**
+   * Where the live build's id is served. By default `build.json` under the app's `base`, as the
+   * Vite plugin tells the browser; an app with a relative `base` (`./`) names it here.
+   */
+  buildFile?: string;
+};
+
 /**
  * Starts this tab's watch. Call it in the browser before the app renders, so a chunk that fails
  * during hydration is known; nothing happens on the server, in development, or a second time.
  */
-export function startDeployWatch(): void {
+export function startDeployWatch({ buildFile }: StartOptions = {}): void {
   if (watch || typeof window === "undefined") return;
   const current = pageBuildId();
   if (!current) return;
+  const file =
+    buildFile ??
+    (typeof __DEPLOY_WATCH_BUILD_FILE__ === "string" ? __DEPLOY_WATCH_BUILD_FILE__ : BUILD_FILE);
   const tab = createDeployWatch({
     current,
-    fetchLive: fetchLiveBuild,
+    fetchLive: () => fetchLiveBuild(file),
     now: Date.now,
     storage: sessionStore(),
     load: (href) => (href ? window.location.assign(href) : window.location.reload()),

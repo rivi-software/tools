@@ -15,7 +15,7 @@ let root: string;
 // directory, which a server build leaves external unless told otherwise. (A workspace link
 // resolves outside node_modules, is bundled as source, and hides the difference.)
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), "deploy-watch-ssr-"));
+  root = mkdtempSync(join(tmpdir(), "deploy-watch-build-"));
   const installed = join(root, "node_modules", "@rivi-software", "deploy-watch");
   mkdirSync(installed, { recursive: true });
   execFileSync(tsc, [
@@ -28,6 +28,10 @@ beforeAll(() => {
   writeFileSync(
     join(root, "entry.js"),
     'import { pageBuildId } from "@rivi-software/deploy-watch";\nexport const id = pageBuildId();\n',
+  );
+  writeFileSync(
+    join(root, "client.js"),
+    'import { startDeployWatch } from "@rivi-software/deploy-watch";\nstartDeployWatch();\n',
   );
 }, 60_000);
 
@@ -64,4 +68,23 @@ test("left external, as a define alone leaves it, the package never sees the id"
   const code = await serverBuild(defineOnly);
   expect(code).toMatch(IMPORT);
   expect(code).not.toContain('"abc123"');
+});
+
+test("a browser build under another base reads build.json there, and never holds the id", async () => {
+  const result = await build({
+    root,
+    base: "/app/",
+    configFile: false,
+    logLevel: "silent",
+    plugins: [deployWatch({ buildId: "abc123" })],
+    build: { write: false, rollupOptions: { input: join(root, "client.js") } },
+  });
+  const files = (Array.isArray(result) ? result : [result]).flatMap((output) =>
+    "output" in output ? output.output : [],
+  );
+  const code = files.map((file) => ("code" in file ? file.code : "")).join("\n");
+  expect(code).toContain("/app/build.json");
+  expect(code).not.toContain("abc123");
+  const asset = files.find((file) => file.fileName === "build.json");
+  expect(asset && "source" in asset ? String(asset.source) : "").toBe('{"id":"abc123"}\n');
 });
