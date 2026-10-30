@@ -52,7 +52,7 @@ Work on a branch in your fork. One pull request makes one change, to one package
 ### What happens next
 
 1. **CI** runs `verify` on Node 22, 24 and 26, and its `verify` check must pass before the pull request can merge. Until a first pull request of yours has merged here, GitHub waits for a maintainer to approve each run before it starts.
-2. **Review.** A maintainer reviews the pull request. They may also ask [rivi-bot](rivi-bot), an automated reviewer that runs Claude, to review it; it only reads the change and comments. Its comments are advice: fix what is right, and reply where it is wrong.
+2. **Review.** A maintainer reviews the pull request. They may also ask [rivi-bot](rivi-bot), an automated reviewer that runs Claude, to review it, and it then reviews each later push as well; it only reads the change and comments. Its comments are advice: fix what is right, and reply where it is wrong.
 3. **Merge.** A maintainer squash-merges the pull request once it is reviewed and `verify` passes.
 4. **Release.** The next release of the package publishes your changeset to npm (see [Changes and releases](#changes-and-releases)).
 
@@ -144,7 +144,11 @@ A relative import names the file the build emits, `./util.js` for `src/util.ts`:
 
 ### Reviews by rivi-bot
 
-A maintainer asks [rivi-bot](rivi-bot) for a review by adding the `rivi-bot:review` label to a pull request. Read the pull request first: the review spends the API key's budget, and Claude reads everything in the pull request. Claude then reviews the commit that was labeled and posts one review with inline comments. The label comes off afterwards, so after a push the label goes on again for another review, which reads only what changed. The review is advice: a maintainer still approves and merges.
+[rivi-bot](rivi-bot) reviews a pull request by someone with write access to the repository on its own: when it opens or leaves draft, and after every push. It posts one review with inline comments per commit, and approves when nothing has to change. An approval stands for the commit it read: the next review dismisses it first.
+
+Any other pull request waits for a maintainer, who asks for reviews by adding the `rivi-bot:review` label. Read the pull request first: the reviews spend the API key's budget, and Claude reads everything in the pull request. Claude reviews the commit that was labeled. The label stays on, so each later push is reviewed too, up to a follow-up's budget each, until a maintainer takes the label off. These reviews comment and never approve, because an outside pull request could carry text written to steer a review into approving. To retry a review that failed, re-run its workflow run.
+
+A review after the first reads only what changed since the last one. A push to a draft is not reviewed, but the label still asks for a review of a draft. Either way the review is advice: a maintainer still approves and merges.
 
 The workflow ([`.github/workflows/rivi-bot.yml`](.github/workflows/rivi-bot.yml)) needs the `ANTHROPIC_REVIEW_API_KEY` secret. With the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret of an App installed here, the reviews come from that App rather than `github-actions`.
 

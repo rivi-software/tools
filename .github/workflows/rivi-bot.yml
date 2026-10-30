@@ -1,27 +1,93 @@
 name: rivi-bot
 
-# rivi-bot reviews a pull request once a maintainer approves: adding the `rivi-bot:review` label
-# is the approval. It reviews the commit that was labeled, with Claude through the rivi-bot
-# action (rivi-bot/action.yml), then takes the label off, so a later push needs a new approval.
+# rivi-bot reviews pull requests with Claude, through the rivi-bot action (rivi-bot/action.yml).
 #
-# Pull requests from forks are reviewed too: pull_request_target runs this file as it is on main,
-# with the secrets, and the review only reads the pull request; nothing from it runs. Labeling
-# needs triage access, and the review also checks that whoever added the label can write to the
-# repository. Issues get nothing from rivi-bot for now.
+# - A pull request by someone who can write to the repository is reviewed when it opens or leaves
+#   draft, and after every push. Its review approves when nothing has to change.
+# - Any other pull request waits for a maintainer's approval: adding the `rivi-bot:review` label.
+#   The label stays on, so every later push is reviewed too, until a maintainer takes it off.
+#   These reviews only comment: an approval is what a prompt injection would aim for.
+# - A push to a draft is not reviewed; the label still asks for a review of one.
+#
+# A review after the first reads only what changed since the last one. Pull requests from forks
+# are reviewed too: pull_request_target runs this file as it is on main, with the secrets, and the
+# review only reads the pull request; nothing from it runs. Labeling needs triage access, and the
+# gate also checks that whoever added the label can write to the repository. Issues get nothing
+# from rivi-bot for now.
 on:
   pull_request_target:
-    types: [labeled]
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
 
 permissions: {}
 
 jobs:
+  # Whether to review this commit, and whether the review may approve.
+  gate:
+    name: gate
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'rivi-bot:review') ||
+      (github.event.action != 'labeled' && !github.event.pull_request.draft)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write # takes off a label that someone without write access added
+    outputs:
+      review: ${{ steps.check.outputs.review }}
+      approve: ${{ steps.check.outputs.approve }}
+    steps:
+      - name: Check the approval
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTION: ${{ github.event.action }}
+          SENDER: ${{ github.event.sender.login }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'rivi-bot:review') }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          can_write() {
+            case "$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$1/permission" --jq .permission)" in
+              admin | maintain | write) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+          internal=false
+          if can_write "$AUTHOR"; then internal=true; fi
+
+          if [ "$ACTION" = labeled ]; then
+            if ! can_write "$SENDER"; then
+              echo "::error::@$SENDER cannot write to the repository; a maintainer with write access approves reviews."
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/rivi-bot%3Areview" --silent || true
+              exit 1
+            fi
+            echo "@$SENDER approved reviews of #$PR_NUMBER."
+          elif [ "$internal" = true ]; then
+            echo "@$AUTHOR can write to the repository; #$PR_NUMBER is reviewed on every push."
+          elif [ "$LABELED" = true ] &&
+            approver=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/events" --paginate \
+              --jq '.[] | select(.event == "labeled" and .label.name == "rivi-bot:review") | .actor.login' | tail -n 1) &&
+            [ -n "$approver" ] && can_write "$approver"; then
+            # The label is on, and whoever added it last can still write to the repository.
+            echo "@$approver approved reviews of #$PR_NUMBER."
+          else
+            echo "#$PR_NUMBER waits for a maintainer to add the rivi-bot:review label."
+            echo "review=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "review=true"
+            echo "approve=$internal"
+          } >> "$GITHUB_OUTPUT"
+
   review:
     name: review
-    if: github.event.label.name == 'rivi-bot:review'
+    needs: gate
+    if: needs.gate.outputs.review == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # One review of a pull request at a time; none that started is cancelled, since a
-    # half-posted review helps nobody.
+    # half-posted review helps nobody. Of the pushes that wait, only the latest is reviewed.
     concurrency:
       group: rivi-bot-review-${{ github.event.pull_request.number }}
       cancel-in-progress: false
@@ -29,22 +95,6 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - name: Check the approval
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SENDER: ${{ github.event.sender.login }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$SENDER/permission" --jq .permission)
-          case "$permission" in
-            admin | maintain | write) echo "@$SENDER ($permission) approved a review of #$PR_NUMBER." ;;
-            *)
-              echo "::error::@$SENDER has $permission access; a maintainer with write access approves a review."
-              exit 1
-              ;;
-          esac
-
       - name: Check the credentials
         env:
           KEY_SET: ${{ secrets.ANTHROPIC_REVIEW_API_KEY != '' }}
@@ -75,6 +125,7 @@ jobs:
           reviewer: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
           pull-request: ${{ github.event.pull_request.number }}
           head-sha: ${{ github.event.pull_request.head.sha }}
+          approve: ${{ needs.gate.outputs.approve }}
 
       - name: Report a failed review
         if: failure() && steps.review.conclusion == 'failure'
@@ -85,12 +136,4 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "rivi-bot could not review $HEAD_SHA ([the run]($RUN_URL)). Add the \`rivi-bot:review\` label again to retry."
-
-      # One label, one review: a later push needs a maintainer's approval again.
-      - name: Take the label off
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/rivi-bot%3Areview" --silent || true
+            --body "rivi-bot could not review $HEAD_SHA ([the run]($RUN_URL)). A maintainer can re-run it."
