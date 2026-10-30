@@ -1,0 +1,43 @@
+{
+  "name": "@rivi-software/semgrep-github-report",
+  "version": "0.1.0",
+  "description": "Posts Semgrep findings on a GitHub pull request as one comment it keeps updating, or lists them in the job summary, with only the job's GITHUB_TOKEN",
+  "keywords": [
+    "semgrep",
+    "github-actions",
+    "pull-request",
+    "job-summary",
+    "sast",
+    "security"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "semgrep-github-report": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/semgrep-github-report"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/semgrep-github-report#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}

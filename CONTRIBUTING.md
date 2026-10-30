@@ -79,6 +79,12 @@ A relative import names the file the build emits, `./util.js` for `src/util.ts`:
 
 `pnpm run check:packages` (after `pnpm run build`) checks the packages as a consumer gets them from npm. It packs each one as `pnpm publish` would; [arethetypeswrong](https://github.com/arethetypeswrong/arethetypeswrong.github.io) reads every entry point's types under Node's ESM and bundler resolution; then plain Node installs the tarballs, with their peers at the versions in `devDependencies`, imports every entry point and checks every `bin`. A `cloudflare:` module resolves to an empty stand-in there, so entry points for Workers load as well.
 
+## Reviews by rivi-bot
+
+A maintainer asks [rivi-bot](rivi-bot) for a review by adding the `rivi-bot:review` label to a pull request. Claude then reviews the commit that was labeled and posts one review with inline comments. The label comes off afterwards, so after a push the label goes on again for another review, which reads only what changed. The review is advice: a maintainer still approves and merges.
+
+The workflow ([`.github/workflows/rivi-bot.yml`](.github/workflows/rivi-bot.yml)) needs the `ANTHROPIC_REVIEW_API_KEY` secret. With the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret of an App installed here, the reviews come from that App rather than `github-actions`.
+
 ## Changes and releases
 
 A change to a published package comes with a changeset: run `pnpm changeset`, pick the packages and the bump, and write the line their changelogs get, for the people who use them. A new package needs none; its first version is the one in its `package.json`.
