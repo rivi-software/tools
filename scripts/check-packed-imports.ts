@@ -110,6 +110,9 @@ try {
       "--no-audit",
       "--no-fund",
       "--loglevel=error",
+      // Like pnpm's minimumReleaseAge for the workspace: no release younger than a day, which can
+      // be listed before its tarball is served, or turn out to be a bad release.
+      `--before=${new Date(Date.now() - 86_400_000).toISOString()}`,
       ...tarballs,
       ...[...peers].map(([name, version]) => `${name}@${version}`),
     ],
