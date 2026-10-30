@@ -7,7 +7,8 @@
  */
 export function parseMailAddress(raw: string): { email: string; name: string | null } {
   const address = raw.trim();
-  const open = address.indexOf("<");
+  // The address is the last `<…>`: a quoted display name may hold a `<` of its own.
+  const open = address.lastIndexOf("<");
   if (open >= 0 && address.endsWith(">")) {
     const email = address.slice(open + 1, -1);
     let name = address.slice(0, open).trim();

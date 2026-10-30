@@ -67,7 +67,7 @@ SES is used once all three SES values are set; until then, or with any of them e
 
 ## How it works
 
-`sendMail(env, mail)` sends through SES when `env` has its region and key, else through `env.EMAIL`. When SES answers with an error, nothing went out, so the binding sends the message instead and `console.warn` writes one line for the logs with SES's status and error type, never its message, which can name the recipient:
+`sendMail(env, mail)` sends through SES when `env` has its region and key, else through `env.EMAIL`. When SES answers with an error status, the binding sends the message instead. A refusal (4xx) means SES sent nothing. A server error (5xx) almost always means the same, but does not prove it, so in that rare case the message can arrive twice. `console.warn` then writes one line for the logs with SES's status and error type, never its message, which can name the recipient:
 
 ```json
 {"event":"mail.ses_refused","status":403,"code":"AccessDeniedException"}

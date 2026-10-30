@@ -21,13 +21,20 @@ describe("parseMailAddress", () => {
     });
   });
 
+  it("takes the address from the last angle brackets, so a name may hold its own", () => {
+    expect(parseMailAddress('"Acme <Support>" <support@example.com>')).toEqual({
+      email: "support@example.com",
+      name: "Acme <Support>",
+    });
+    expect(parseMailAddress('"a<b" <c@example.com>')).toEqual({
+      email: "c@example.com",
+      name: "a<b",
+    });
+    expect(parseMailAddress("Jane <a> <b>")).toEqual({ email: "b", name: "Jane <a>" });
+  });
+
   it("reads anything else as an address alone", () => {
-    for (const raw of [
-      'Jane "J" Doe <jane@example.com>',
-      "Jane <>",
-      "Jane <a> <b>",
-      "Jane <jane@example.com",
-    ])
+    for (const raw of ['Jane "J" Doe <jane@example.com>', "Jane <>", "Jane <jane@example.com"])
       expect(parseMailAddress(raw)).toEqual({ email: raw, name: null });
   });
 
