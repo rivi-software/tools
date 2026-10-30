@@ -1,0 +1,29 @@
+{
+  "name": "@rivi-software/workers-mail",
+  "version": "0.1.0",
+  "description": "Mail from Cloudflare Workers: Amazon SES once the Worker holds its key, Cloudflare Email Service's send_email binding until then and whenever SES refuses a message",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./address": { "types": "./dist/address.d.ts", "default": "./dist/address.js" }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@opencoredev/email-sdk": "^3.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/workers-mail"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/workers-mail#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": { "access": "public" }
+}
