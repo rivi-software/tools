@@ -74,13 +74,13 @@ To report errors, report only what stays: `recoverFromChunkError(error).then((re
   - The plugin also bundles this package into server builds (`resolve.noExternal`): a define reaches only bundled code, and Vite leaves dependencies external there by default.
   - The dev server and a local build have no id, and nothing runs.
 - **The page's id.** `BuildMeta` renders `<meta name="deploy-watch-build">` in the document's head on the server. In the browser it reads the tag back, so hydration matches.
-- **The check.** `startDeployWatch()` reads `build.json` (`no-store`):
-  - when the tab comes back into view or gets focus, at most once a minute
+- **The check.** `startDeployWatch()` reads `build.json` (`no-store`, without cookies, giving up after 10 s):
+  - when the tab comes back into view, gets focus or comes back online, at most once a minute
   - every ten minutes while it is visible
   - after a back/forward-cache restore
   - at once when Vite's preload helper reports a chunk that failed (`vite:preloadError`)
 
-  Once the live id differs from the page's, the build is new, and it stays new for the tab.
+  Once the live id differs from the page's, the build is new, and it stays new for the tab. An answer that is not a build file, such as a sign-in page in its place, changes nothing, so serve `build.json` to visitors who are not signed in.
 - **The move.** Once the build is new:
   - `followNewBuild(router)` makes the router's next move to another path a whole-page load. It runs on `onBeforeNavigate`, after the router's blockers let the move through, and flushes the history's queued address change before it reloads, so the destination loads with one history entry. A move within the page (its search or hash) stays in place.
   - `useNewBuildNotice()` gives a notice its state: `show`, `dismiss` and `reload`. A reload on a page with unsaved work asks first, through the page's own `beforeunload`.
@@ -141,11 +141,42 @@ ClientRouter remembers the scripts it ran by address, and a deploy renames every
 
 ## Exports
 
-| Entry point | Contents | Runs in |
-| --- | --- | --- |
-| `@rivi-software/deploy-watch` | `startDeployWatch({ buildFile })`, `followNewBuild`, `isNewBuildLive`, `subscribeToNewBuild`, `reloadOntoNewBuild`, `isReloadingOntoNewBuild`, `recoverFromChunkError`, `isChunkLoadError`, `pageBuildId`, `isWatching`, `parseBuildFile`; `createDeployWatch` over injected dependencies; the constants `BUILD_META_NAME`, `BUILD_FILE`, `CHECK_SPACING_MS`, `CHECK_INTERVAL_MS`, `RELOADED_FOR_KEY` and `CHUNK_RETRY_KEY`; the types `StartOptions`, `DeployWatch`, `DeployWatchDeps`, `NavigationEvent` and `NavigationEvents` | Browser and server (no-ops on the server) |
-| `@rivi-software/deploy-watch/react` | `BuildMeta`, `useNewBuildNotice`, `useChunkErrorRecovery` | React, both sides |
-| `@rivi-software/deploy-watch/vite` | `deployWatch({ buildId })`, the Vite plugin; `buildFileUnder(base)`, where `build.json` is served; `PACKAGE_PATTERN`, what the plugin bundles into server builds; the type `DeployWatchOptions` | Vite config |
+From `@rivi-software/deploy-watch` (browser and server; on the server, and in a build without an id, each call does nothing):
+
+| Export | What |
+| --- | --- |
+| `startDeployWatch({ buildFile? })` | Starts the tab's watch; call it in the browser before the app renders |
+| `followNewBuild(router)` | Makes the router's next move to another path a whole-page load once the build is new; returns the unsubscribe |
+| `recoverFromChunkError(error)` | Resolves `true` when `error` is a missing chunk and the page is reloading, `false` when the error screen should show |
+| `isChunkLoadError(error)` | Whether `error` is a chunk of script or style that did not load |
+| `isNewBuildLive()`, `subscribeToNewBuild(listener)` | Whether a newer build is live; a listener for the moment it is (returns the unsubscribe) |
+| `reloadOntoNewBuild(href?)` | Loads `href`, or this page again, on the live build |
+| `isReloadingOntoNewBuild()` | Whether a reload has started, so errors until the page is gone can go unreported |
+| `isWatching()` | Whether the watch runs: a deployed build, in the browser |
+| `pageBuildId()` | The page's build id: the build's on the server, the meta tag's in the browser; empty without one |
+| `parseBuildFile(body)` | The id in a parsed `build.json`, or `null` |
+| `createDeployWatch(deps)` | The watch over injected dependencies (`current`, `fetchLive`, `now`, `storage`, `load`), for tests and other hosts |
+| `BUILD_META_NAME`, `BUILD_FILE` | `deploy-watch-build` and `/build.json` |
+| `CHECK_SPACING_MS`, `CHECK_INTERVAL_MS` | A minute between checks the tab's own activity starts; ten minutes between checks while it is visible |
+| `RELOADED_FOR_KEY`, `CHUNK_RETRY_KEY` | The session storage keys of the [loop guard](#how-it-works) |
+| Types | `StartOptions`, `DeployWatch`, `DeployWatchDeps`, `NavigationEvent`, `NavigationEvents` |
+
+From `@rivi-software/deploy-watch/react` (server and browser):
+
+| Export | What |
+| --- | --- |
+| `BuildMeta` | The `<meta>` with the page's build id, for the document's `<head>` |
+| `useNewBuildNotice()` | `{ show, dismiss, reload }` for a new-version notice |
+| `useChunkErrorRecovery(error)` | `true` while an error screen should render a placeholder instead of the error |
+
+From `@rivi-software/deploy-watch/vite` (Vite config):
+
+| Export | What |
+| --- | --- |
+| `deployWatch({ buildId? })` | The Vite plugin; an empty `buildId` turns the watch off |
+| `buildFileUnder(base)` | Where `build.json` is served under a `base` |
+| `PACKAGE_PATTERN` | What the plugin bundles into server builds |
+| Types | `DeployWatchOptions` |
 
 ## Development
 
