@@ -188,6 +188,8 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1))
 
+  packages/cloudflare-deploy: {}
+
   packages/posthog-tanstack-start:
     devDependencies:
       '@posthog/rollup-plugin':
@@ -215,11 +217,13 @@ importers:
         specifier: 8.3.5
         version: 8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1)
 
+  packages/semgrep-github-report: {}
+
   packages/vite-plugin-zod-jitless:
     devDependencies:
       vite:
         specifier: 8.3.5
-        version: 8.3.5(@types/node@22.20.5)(yaml@2.9.1)
+        version: 8.3.5(@types/node@22.20.5)(jiti@2.7.0)(yaml@2.9.1)
       zod:
         specifier: 4.6.7
         version: 4.6.7
