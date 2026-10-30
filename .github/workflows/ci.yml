@@ -20,8 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The packages support Node 22 and later; .node-version is the one we develop on.
-        node: ["22", "24"]
+        # The packages support Node 22 and later, until 22's end of life on 2027-04-30; then the
+        # floor moves to 24 (here, in `engines` and in @types/node). .node-version is the one
+        # we develop on.
+        node: ["22", "24", "26"]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
