@@ -34,7 +34,7 @@ inputs:
     required: false
     default: "true"
   approve:
-    description: "`true` lets Claude approve when nothing has to change. Off by default: where pull requests come from outside the project, an approval is what a prompt injection would aim for."
+    description: "`true` lets Claude approve when nothing has to change, and dismisses the reviewer's earlier approvals before it reviews a later commit. Off by default: where pull requests come from outside the project, an approval is what a prompt injection would aim for."
     required: false
     default: "false"
   focus:
@@ -146,6 +146,34 @@ runs:
           full) echo "Could not separate the changes since $SINCE_SHA; reviewing the whole pull request." ;;
         esac
         echo "scope=$scope" >> "$GITHUB_OUTPUT"
+
+    # An approval stands for the commit it read. Before a later commit is reviewed, the reviewer's
+    # earlier approvals are dismissed; the new review approves again if nothing has to change.
+    # Dismissed reviews keep their commit, so the next follow-up still starts from them. A failure
+    # here warns and the review goes on.
+    - name: Dismiss earlier approvals
+      if: inputs.approve == 'true' && steps.pr.outputs.run == 'true' && steps.changes.outputs.scope != 'none'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ inputs.pull-request }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        REVIEWER: ${{ inputs.reviewer }}
+      run: |
+        set -uo pipefail
+        if ! approvals=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --paginate \
+          --jq ".[] | select(.user.login == \"$REVIEWER\" and .state == \"APPROVED\") | .id"); then
+          echo "::warning::Could not list $REVIEWER's earlier reviews; an earlier approval may stand."
+          exit 0
+        fi
+        for id in $approvals; do
+          if gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews/$id/dismissals" \
+            -f event=DISMISS -f message="This approval was for an earlier commit; $HEAD_SHA is under review." --silent; then
+            echo "Dismissed $REVIEWER's approval $id."
+          else
+            echo "::warning::Could not dismiss $REVIEWER's approval $id."
+          fi
+        done
 
     # The diff, the inline comments and the review all name `head-sha`, so a push mid-run cannot
     # move the review onto a commit Claude did not read. A follow-up review is smaller: less
