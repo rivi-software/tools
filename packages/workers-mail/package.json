@@ -2,6 +2,16 @@
   "name": "@rivi-software/workers-mail",
   "version": "0.1.0",
   "description": "Mail from Cloudflare Workers: Amazon SES once the Worker holds its key, Cloudflare Email Service's send_email binding until then and whenever SES refuses a message",
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "email",
+    "transactional-email",
+    "amazon-ses",
+    "ses",
+    "cloudflare-email-service",
+    "send-email"
+  ],
   "license": "MIT",
   "type": "module",
   "exports": {

@@ -155,6 +155,10 @@ The package's own tests run in Node with Vitest: SES is answered by a spy on the
 - Attachments are base64 strings: Email Service's local simulator in `wrangler dev` cannot take an `ArrayBuffer`, and SES wants base64.
 - Through the binding, recipients' display names are dropped.
 
+## Development
+
+The tests in `tests/` cover both transports and the fallback between them against a stand-in SES and binding, the addresses and headers each transport takes, the telemetry opt-out (`mail.test.ts`) and the address parser (`address.test.ts`). None of them sends mail. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+
 ## License
 
 [MIT](LICENSE)

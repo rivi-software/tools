@@ -15,6 +15,7 @@ disableTelemetry();
 /** `jane@example.com`, `Jane <jane@example.com>`, or the address with its display name apart. */
 export type MailAddress = string | { email: string; name?: string | null };
 
+/** A file sent with the message: an attachment, or an inline image the HTML names as `cid:<contentId>`. */
 export type MailAttachment = {
   filename: string;
   /** The MIME type. */
@@ -26,6 +27,7 @@ export type MailAttachment = {
   | { disposition: "inline"; contentId: string }
 );
 
+/** A message for `sendMail`, `sendWithSes` or `sendWithBinding`; `text`, `html` or both. */
 export type Mail = {
   from: MailAddress;
   to: MailAddress | readonly MailAddress[];
@@ -42,8 +44,10 @@ export type Mail = {
   tags?: Record<string, string>;
 };
 
+/** Which transport sent a message: Amazon SES, or Cloudflare Email Service's binding. */
 export type MailTransport = "ses" | "email-service";
 
+/** What `sendMail` answers once a message went out. */
 export type SentMail = {
   transport: MailTransport;
   /** The provider's id for the message: SES's `MessageId`, or the binding's `messageId`. */
@@ -63,6 +67,7 @@ export type MailEnv = {
   SES_SECRET_ACCESS_KEY?: string;
 };
 
+/** SES's region and an IAM user's access key, as `sesConfig` reads them from the Worker's env. */
 export type SesConfig = { region: string; accessKeyId: string; secretAccessKey: string };
 
 /** A message that was not sent: what the transport answered, with SES's error type or the binding's code. */
