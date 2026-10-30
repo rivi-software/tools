@@ -4,6 +4,8 @@ Small packages RIVI Software builds its own apps with, for Cloudflare Workers, V
 
 The packages are ESM only and ship JavaScript with type declarations. Where they run in Node, they support Node 22 and later.
 
+[`rivi-bot`](rivi-bot) is a GitHub Action rather than a package: a pull request review by Claude, run once a maintainer approves it.
+
 ## Development
 
 Node 24 and pnpm 12:
