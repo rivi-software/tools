@@ -12,6 +12,7 @@ export type RunOptions = {
   capture?: boolean;
 };
 
+/** The exit code, and the output when `capture` was set (empty otherwise). */
 export type RunResult = { code: number; stdout: string; stderr: string };
 
 /** Resolves a package binary (`node_modules/.bin/<name>`) from `from` upwards; falls back to PATH. */
@@ -94,6 +95,7 @@ export function nodeScript(script: string, args: string[] = []): string[] {
   return [process.execPath, "--disable-warning=DEP0205", "--import", "tsx", script, ...args];
 }
 
+/** Resolves after `ms` milliseconds. */
 export const sleep = (ms: number) => new Promise<void>((settle) => setTimeout(settle, ms));
 
 /** True for an existing regular file; directories and missing paths are false. */

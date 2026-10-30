@@ -1,7 +1,9 @@
 const CLOUDFLARE_ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/;
 
+/** The environment a guard reads; `process.env` by default. */
 export type Env = Record<string, string | undefined>;
 
+/** The variable's value; throws, naming the variable, when it is unset or empty. */
 export function requireEnv(name: string, env: Env = process.env): string {
   const value = env[name];
   if (value == null || value === "") {
@@ -10,7 +12,10 @@ export function requireEnv(name: string, env: Env = process.env): string {
   return value;
 }
 
-/** Cloudflare account IDs are 32 lowercase hexadecimal characters. */
+/**
+ * The account ID in `name` (default `CLOUDFLARE_ACCOUNT_ID`); throws unless it is 32 lowercase
+ * hexadecimal characters, as Cloudflare account IDs are.
+ */
 export function requireCloudflareAccountId(
   env: Env = process.env,
   name = "CLOUDFLARE_ACCOUNT_ID",
@@ -44,6 +49,7 @@ export function assertProductionBuildBranch(env: Env = process.env, branch = "ma
     throw new Error(`Cloudflare production deployment requires WORKERS_CI_BRANCH=${branch}`);
 }
 
+/** The variable's value; throws when it is unset, empty, or shorter than `minLength` characters. */
 export function requireEnvMinLength(
   name: string,
   minLength: number,

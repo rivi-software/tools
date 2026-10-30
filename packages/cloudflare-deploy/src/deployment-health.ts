@@ -8,9 +8,11 @@ export type HealthCheckOptions = {
   paths?: string[];
   /** Validates a `2xx` response body; throw to fail the check without retrying. */
   validate?: (response: Response) => Promise<void> | void;
+  /** Rounds over `paths` before the check fails. Default 16. */
   attempts?: number;
-  /** Pause between attempts, in milliseconds. */
+  /** Pause between attempts, in milliseconds. Default 4000. */
   delayMs?: number;
+  /** How long one request may take, in milliseconds. Default 30,000. */
   timeoutMs?: number;
   /** The pause itself; tests inject a no-op. */
   sleep?: (ms: number) => Promise<void>;
@@ -21,6 +23,8 @@ export type HealthCheckOptions = {
  * retried; any other failing status fails the check at once, because the deployment is wrong
  * rather than late. The default window (a minute of pauses) outlasts a custom domain's rollout,
  * during which the previous version keeps answering for tens of seconds after `wrangler deploy`.
+ * Redirects are not followed: one fails the attempt like a network error, so pass the origin that
+ * answers.
  */
 export async function checkDeploymentHealth(origin: string, options: HealthCheckOptions = {}) {
   const {
