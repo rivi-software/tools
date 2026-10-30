@@ -1,0 +1,57 @@
+{
+  "name": "@rivi-software/cloudflare-deploy",
+  "version": "0.1.0",
+  "description": "Deploy helpers for Cloudflare Workers apps: environment guards, a post-deploy health check, a REST API client for D1, KV, R2 and Workers for Platforms, and skew protection that keeps earlier builds' client files served after a deploy",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cloudflare-api": {
+      "types": "./dist/cloudflare-api.d.ts",
+      "default": "./dist/cloudflare-api.js"
+    },
+    "./previous-assets": {
+      "types": "./dist/previous-assets.d.ts",
+      "default": "./dist/previous-assets.js"
+    }
+  },
+  "bin": {
+    "cloudflare-retain-assets": "./dist/retain-assets-cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "wrangler",
+    "deploy",
+    "d1",
+    "kv",
+    "r2",
+    "workers-for-platforms",
+    "skew-protection"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/cloudflare-deploy"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/cloudflare-deploy#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}
