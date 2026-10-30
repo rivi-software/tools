@@ -30,6 +30,9 @@
     "check": "tsc --noEmit",
     "test": "vitest run"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rivi-software/tools.git",
