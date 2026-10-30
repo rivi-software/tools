@@ -13,8 +13,13 @@
 
 export const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
 
+/** One entry of the `errors` Cloudflare answers a failed call with. */
 export type CloudflareError = { code: number; message: string };
 
+/**
+ * A call that failed: its method, its path under the account, the HTTP status and Cloudflare's
+ * errors. The message names the codes, never the token.
+ */
 export class CloudflareApiError extends Error {
   constructor(
     readonly method: string,
@@ -35,9 +40,11 @@ export class CloudflareApiError extends Error {
 
 export type CloudflareApiOptions = {
   accountId: string;
+  /** An API token with the permissions the calls need. */
   token: string;
   /** The transport; tests pass a fake API. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
+  /** How long one request may take, in milliseconds. Default 30,000. */
   timeoutMs?: number;
   /**
    * Sends a read, a replacing write or a delete up to `attempts` times while Cloudflare answers
@@ -136,6 +143,7 @@ export type NamespaceScriptSummary = {
   modified_on?: string;
 };
 
+/** A finished D1 export: the signed URL of its SQL file (valid for an hour) and the file's name. */
 export type D1Export = { signedUrl: string; filename: string };
 
 type Envelope<T> = {
@@ -169,6 +177,13 @@ const isTransient = (status: number) => status === 429 || status >= 500;
 const jurisdictionHeader = (jurisdiction?: Jurisdiction | null): Record<string, string> =>
   jurisdiction ? { "cf-r2-jurisdiction": jurisdiction } : {};
 
+/**
+ * A client for one account: `d1`, `kv`, `r2` and `dispatch` (Workers for Platforms), plus `call`
+ * and `maybe` for any other endpoint under `/accounts/<accountId>`. `call(method, path, init)`
+ * answers the envelope's `result` and throws `CloudflareApiError` on a failure; `maybe` answers
+ * `undefined` for a 404 instead. `init` takes a `json` or `form` body, `query`, `headers`, and
+ * `idempotent` for a POST that is safe to send again under `retry`.
+ */
 export function cloudflareApi(options: CloudflareApiOptions) {
   const transport = options.fetch ?? ((input, init) => fetch(input, init));
   const account = `/accounts/${options.accountId}`;
@@ -525,4 +540,5 @@ export function cloudflareApi(options: CloudflareApiOptions) {
   return { call, maybe, d1, kv, r2, dispatch };
 }
 
+/** The client `cloudflareApi` returns. */
 export type CloudflareApi = ReturnType<typeof cloudflareApi>;
