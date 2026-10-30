@@ -62,3 +62,19 @@ jobs:
 
       - name: Check packed packages
         run: pnpm run check:packages
+
+  # The check the main ruleset requires (.github/rulesets/main.json). It passes only when every
+  # Node version above passed, so the matrix can change without changing the ruleset. It runs
+  # even when one of them failed: a skipped check would count as passing.
+  verified:
+    name: verify
+    if: always()
+    needs: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every Node version passed
+        env:
+          RESULT: ${{ needs.verify.result }}
+        run: |
+          echo "The Node versions together: $RESULT"
+          test "$RESULT" = success
