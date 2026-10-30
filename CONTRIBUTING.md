@@ -59,7 +59,7 @@ packages/<name>/
 - A package ships built JavaScript and declarations from `dist/`, nothing else: `exports` lists every entry point, `types` first, and a command line tool is a `bin` in `dist/` whose source starts with `#!/usr/bin/env node`. `pnpm run check:manifests` enforces these fields.
 - `repository.url` stays exactly as written: npm compares it with the repository a trusted publish comes from and refuses one that differs.
 - What a package plugs into (React, Vite, a framework) is a peer dependency, optional when only one entry point needs it, with the version its tests use in `devDependencies`. Runtime dependencies take caret ranges. TypeScript, Vitest, `@types/node`, Oxlint and Oxfmt come from the root.
-- Where a package runs in Node, it supports Node 22, which CI tests beside Node 24.
+- Where a package runs in Node, it supports Node 22, which CI tests beside Node 24 and 26. The types come from `@types/node` 22, so type-checking rejects an API that Node 22 lacks. When Node 22 reaches its end of life on 2027-04-30, the floor moves to 24: `engines`, `@types/node` and the CI matrix together.
 
 ### TypeScript
 
@@ -100,3 +100,21 @@ npm adds a trusted publisher only to a package that already exists, so a maintai
 
 3. On npmjs.com, under the package's **Settings → Trusted publishing**, add GitHub Actions with organization `rivi-software`, repository `tools` and workflow `release.yml`. Under **Publishing access**, require two-factor authentication and disallow tokens, so only the workflow publishes from then on.
 4. Re-run the failed release workflow. It finds the version on npm and passes.
+
+## Rulesets
+
+GitHub enforces the repository's rulesets; [`.github/rulesets/`](.github/rulesets) holds them and is their source of truth.
+
+- **`main.json`.** `main` changes only through pull requests, squashed, once the `verify` check passes: CI's job that passes when every Node version passed. Nobody pushes to `main` directly, force-pushes or deletes it, and nobody bypasses the rules.
+  - No approval is required. A review, rivi-bot's included, is advice.
+  - A branch need not be up to date with `main` before it merges. Without a merge queue, that would rerun CI on every open pull request after each merge.
+- **`release-tags.json`.** A release tag (`@rivi-software/<name>@<version>`, `rivi-bot-v*`) is created once and is never moved or deleted, because users pin to it.
+
+To change a ruleset, edit its file in a pull request, then apply it:
+
+```bash
+gh api repos/rivi-software/tools/rulesets --jq '.[] | "\(.id) \(.name)"'
+gh api -X PUT repos/rivi-software/tools/rulesets/<id> --input .github/rulesets/main.json
+```
+
+To add a new ruleset: `gh api -X POST repos/rivi-software/tools/rulesets --input .github/rulesets/<name>.json`.
