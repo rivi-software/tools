@@ -31,10 +31,8 @@
     "check": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@posthog/rollup-plugin": "^1.6.2"
-  },
   "peerDependencies": {
+    "@posthog/rollup-plugin": "^1.6.2",
     "@tanstack/react-router": "^1.170.0",
     "@tanstack/react-start": "^1.169.0",
     "posthog-js": "^1.438.21",
@@ -42,10 +40,16 @@
     "vite": "^6.0.0 || ^7.0.0 || ^8.0.0"
   },
   "peerDependenciesMeta": {
+    "@posthog/rollup-plugin": {
+      "optional": true
+    },
     "@tanstack/react-router": {
       "optional": true
     },
     "@tanstack/react-start": {
+      "optional": true
+    },
+    "posthog-js": {
       "optional": true
     },
     "vite": {
@@ -53,6 +57,7 @@
     }
   },
   "devDependencies": {
+    "@posthog/rollup-plugin": "1.6.2",
     "@tanstack/react-router": "1.170.46",
     "@tanstack/react-start": "1.169.4",
     "posthog-js": "1.438.21",

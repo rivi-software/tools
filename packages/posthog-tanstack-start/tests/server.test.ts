@@ -162,4 +162,16 @@ describe("captureServerEvent", () => {
       },
     ]);
   });
+
+  it("reads an empty id as no person, never as the id", () => {
+    record();
+    captureServerEvent("$ai_generation", "", { $ai_model: "m" }, "conv_1");
+    expect(sent).toEqual([
+      {
+        event: "$ai_generation",
+        distinctId: "conv_1",
+        properties: { $ai_model: "m", $process_person_profile: false },
+      },
+    ]);
+  });
 });

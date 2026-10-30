@@ -10,10 +10,19 @@
 Your app keeps control of what it tracks: its own `posthog-js` options, such as consent, analytics and session replay.
 
 ```bash
-npm install @rivi-software/posthog-tanstack-start posthog-js posthog-node
+npm install @rivi-software/posthog-tanstack-start posthog-node posthog-js
+# for the source map upload
+npm install --save-dev @posthog/rollup-plugin
 ```
 
-`posthog-js` and `posthog-node` are peer dependencies, so the app and this package share one SDK. The package is ESM only.
+The PostHog libraries are peer dependencies, so the app and this package share one SDK:
+- `posthog-node`: `./server` and `./start` need it.
+- `posthog-js`: only `./browser` needs it.
+- `@posthog/rollup-plugin`: only `./vite` needs it.
+
+The rollup plugin depends on `@posthog/cli`, whose build script pnpm 12 asks you to approve or deny. Deny it, because the CLI downloads its binary when it first runs: put `allowBuilds: { "@posthog/cli": false }` in `pnpm-workspace.yaml`.
+
+The package is ESM only.
 
 ## Entry points
 

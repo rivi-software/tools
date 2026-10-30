@@ -22,7 +22,9 @@ export function pathRedactor(patterns: readonly string[]): PathRedactor {
           part.startsWith("$") ? SEGMENT : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
         )
         .join("/"),
-      "g",
+      // TanStack Router matches a route in any case by default, so `/T/3f9a…` opens the page too;
+      // redacting too much is the safe side.
+      "gi",
     ),
   }));
   return (text) =>

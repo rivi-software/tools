@@ -3,6 +3,7 @@ import { createMiddleware, createServerOnlyFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { env } from "cloudflare:workers";
 import type { PostHogBrowserConfig } from "./browser.js";
+import { posthogBrowserConfig } from "./config.js";
 import { captureServerException } from "./server.js";
 
 /**
@@ -42,7 +43,5 @@ export const posthogRequestErrors = createMiddleware().server(async ({ next, req
  * server.
  */
 export const getPostHogBrowserConfig = createServerOnlyFn((): PostHogBrowserConfig | null =>
-  env.POSTHOG_PROJECT_TOKEN
-    ? { token: env.POSTHOG_PROJECT_TOKEN, host: env.POSTHOG_HOST || "https://us.i.posthog.com" }
-    : null,
+  posthogBrowserConfig(env),
 );

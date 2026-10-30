@@ -103,7 +103,8 @@ export function captureServerEvent(
     ph
       .captureImmediate({
         event,
-        distinctId: distinctId ?? anonymousId ?? crypto.randomUUID(),
+        // `||`, as `anonymous` reads it: an empty id (`user?.id ?? ""`) is no person.
+        distinctId: distinctId || anonymousId || crypto.randomUUID(),
         properties: anonymous ? { ...properties, $process_person_profile: false } : properties,
       })
       .catch((err) => console.warn("posthog capture failed", (err as Error).message)),

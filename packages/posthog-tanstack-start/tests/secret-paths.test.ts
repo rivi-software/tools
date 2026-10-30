@@ -13,6 +13,12 @@ describe("pathRedactor", () => {
     );
   });
 
+  it("matches a secret path in any case, as the router does", () => {
+    expect(redact("https://app.example.com/T/K3Y0F4T1CK3T")).toBe(
+      "https://app.example.com/t/$token",
+    );
+  });
+
   it("keeps what follows the secret: the page under it, a query, a fragment", () => {
     expect(redact("https://app.example.com/u/l1stk3y/confirm")).toBe(
       "https://app.example.com/u/$token/confirm",
