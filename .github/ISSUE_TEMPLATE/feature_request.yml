@@ -1,0 +1,37 @@
+name: Feature request
+description: A new feature, or a change to what a package does
+labels: [enhancement]
+body:
+  - type: input
+    id: package
+    attributes:
+      label: Package
+      description: The package it is for, or "a new package".
+      placeholder: "@rivi-software/deploy-watch"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The change you have in mind, such as an option, an export or a behaviour. Code showing how you would use it helps.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Workarounds, or other packages that do this.
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you write the pull request?
+      options:
+        - Yes, once we agree on the approach
+        - Yes, with some help
+        - No
