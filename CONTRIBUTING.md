@@ -150,7 +150,7 @@ Any other pull request waits for a maintainer, who asks for reviews by adding th
 
 A review after the first reads only what changed since the last one. A push to a draft is not reviewed, but the label still asks for a review of a draft. Either way the review is advice: a maintainer still approves and merges.
 
-The workflow ([`.github/workflows/rivi-bot.yml`](.github/workflows/rivi-bot.yml)) needs the `ANTHROPIC_REVIEW_API_KEY` secret. With the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret of an App installed here, the reviews come from that App rather than `github-actions`.
+The workflow ([`.github/workflows/review.yml`](.github/workflows/review.yml)) calls the reusable one in [`.github/workflows/rivi-bot.yml`](.github/workflows/rivi-bot.yml), and needs the `ANTHROPIC_REVIEW_API_KEY` secret. With the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret of an App installed here, the reviews come from that App rather than `github-actions`. Other repositories call `rivi-bot.yml` at `main`, so a change to it or to `rivi-bot/action.yml` reaches them as soon as it merges.
 
 ### Changes and releases
 
