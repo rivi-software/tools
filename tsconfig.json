@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Node runs the scripts as they are, stripping their types.
+    "erasableSyntaxOnly": true
+  },
+  "include": ["scripts"]
+}

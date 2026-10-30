@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.tgz
+*.tsbuildinfo
+coverage/
+.DS_Store
+
+# Secrets and environment files (examples are tracked)
+.env*
+!.env.example
+.dev.vars*
+!.dev.vars.example
+.wrangler/

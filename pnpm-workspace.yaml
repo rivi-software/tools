@@ -1,0 +1,5 @@
+packages:
+  - packages/*
+
+# Supply-chain policy: no transitive dependencies from git or tarball URLs.
+blockExoticSubdeps: true
