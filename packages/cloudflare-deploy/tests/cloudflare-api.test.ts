@@ -58,6 +58,23 @@ test("a D1 name search only matches the exact name", async () => {
   expect(await api.d1.find("app-a")).toBeUndefined();
 });
 
+test("a D1 name search pages through its matches to the exact name", async () => {
+  // A hundred databases whose names contain the one wanted fill the first page.
+  const similar = Array.from({ length: 100 }, (_, index) => ({
+    uuid: `db-${index}`,
+    name: `app-a-${index + 1}`,
+  }));
+  const { api, calls } = fakeApi(({ url }) =>
+    url.searchParams.get("page") === "1"
+      ? ok(similar, { result_info: { page: 1, total_pages: 2 } })
+      : ok([{ uuid: "db-wanted", name: "app-a" }], { result_info: { page: 2, total_pages: 2 } }),
+  );
+  expect(await api.d1.find("app-a")).toEqual({ uuid: "db-wanted", name: "app-a" });
+  expect(calls.map(({ url }) => url.searchParams.get("page"))).toEqual(["1", "2"]);
+  expect(calls[1].url.searchParams.get("name")).toBe("app-a");
+  expect(calls[1].url.searchParams.get("per_page")).toBe("100");
+});
+
 test("D1 create sends replication and drops the location hint under a jurisdiction", async () => {
   const { api, calls } = fakeApi(() => ok({ uuid: "db-1", name: "n" }));
   await api.d1.create({

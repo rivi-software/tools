@@ -33,6 +33,12 @@ export const assetKey = (pathname: string) => pathname.slice(1);
 // KV refuses a key longer than 512 bytes; no build file has one.
 const MAX_KEY_BYTES = 512;
 
+const notFound = () =>
+  new Response("Not found", {
+    status: 404,
+    headers: { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" },
+  });
+
 /** Whether the request reads a build file, which only the store may still hold. */
 export function isAssetRequest(request: Request, url = new URL(request.url)) {
   return (
@@ -51,16 +57,19 @@ export async function servePreviousAsset(
   request: Request,
   store: PreviousAssetStore | undefined,
 ): Promise<Response> {
-  const key = assetKey(new URL(request.url).pathname);
+  // The store keys a file by its name as the build wrote it, a request names it percent-encoded
+  // (`Über page-1.js` as `%C3%9Cber%20page-1.js`), and a malformed escape names no file at all.
+  let key: string;
+  try {
+    key = assetKey(decodeURIComponent(new URL(request.url).pathname));
+  } catch {
+    return notFound();
+  }
   const found =
     store && new TextEncoder().encode(key).length <= MAX_KEY_BYTES
       ? await store.getWithMetadata(key, "arrayBuffer")
       : null;
-  if (!found?.value)
-    return new Response("Not found", {
-      status: 404,
-      headers: { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" },
-    });
+  if (!found?.value) return notFound();
   const metadata = found.metadata as Partial<PreviousAssetMetadata> | null;
   return new Response(request.method === "HEAD" ? null : found.value, {
     headers: {

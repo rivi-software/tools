@@ -49,6 +49,24 @@ test("serves an earlier build's file with its type, cached as immutable", async 
   expect(head.body).toBeNull();
 });
 
+test("finds a file whose name the request percent-encodes; a malformed escape is a 404", async () => {
+  const { kv, reads } = store({
+    "assets/Über page-1.js": { bytes: "export {}", contentType: "text/javascript; charset=utf-8" },
+  });
+  const response = await servePreviousAsset(
+    new Request("https://x.test/assets/%C3%9Cber%20page-1.js"),
+    kv,
+  );
+  expect(reads).toEqual(["assets/Über page-1.js"]);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe("export {}");
+
+  const malformed = await servePreviousAsset(new Request("https://x.test/assets/%E0%A4%A.js"), kv);
+  expect(malformed.status).toBe(404);
+  expect(malformed.headers.get("cache-control")).toBe("no-store");
+  expect(reads).toHaveLength(1);
+});
+
 test("a file no build has, or a Worker without a store, is a 404 nobody caches", async () => {
   const { kv } = store({});
   for (const answer of [

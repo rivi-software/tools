@@ -255,12 +255,14 @@ export function cloudflareApi(options: CloudflareApiOptions) {
   }
 
   const d1 = {
-    /** The database with exactly this name (the API's name filter is a search). */
+    /**
+     * The database with exactly this name. The API's name filter is a search, so this pages
+     * through every database whose name contains it (`app-a-1` … `app-a-150` beside `app-a`).
+     */
     async find(name: string): Promise<D1DatabaseInfo | undefined> {
-      const found = await call<D1DatabaseInfo[]>("GET", "/d1/database", {
-        query: { name, per_page: 100 },
-      });
-      return found.find((database) => database.name === name);
+      for await (const database of pages<D1DatabaseInfo>("/d1/database", 100, { name }))
+        if (database.name === name) return database;
+      return undefined;
     },
     create(input: {
       name: string;
