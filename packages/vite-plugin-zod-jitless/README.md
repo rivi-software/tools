@@ -64,6 +64,10 @@ It wraps `zod`, `zod/v4`, `zod/mini`, `zod/v4-mini`, `zod/v4/mini` and `zod/v4/c
 
 `@rivi-software/vite-plugin-zod-jitless` exports `zodJitless(): Plugin`.
 
+## Development
+
+The tests build a small app with Vite, or serve it with the dev server, then run what a browser would load in a Node process started with `--disallow-code-generation-from-strings`. That flag refuses `eval` and `new Function` as a policy without `'unsafe-eval'` does, and the process counts every attempt. With the plugin there is none, in the app and in a pre-bundled dependency; without it, Zod's probe shows up. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+
 ## License
 
 [MIT](LICENSE)

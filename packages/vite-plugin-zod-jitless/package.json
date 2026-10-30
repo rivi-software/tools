@@ -15,6 +15,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run"
   },
+  "engines": { "node": ">=22" },
   "peerDependencies": {
     "vite": "^8.0.0",
     "zod": "^4.0.0"
