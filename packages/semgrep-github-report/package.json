@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/semgrep-github-report",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Posts Semgrep findings on a GitHub pull request as one comment it keeps updating, or lists them in the job summary, with only the job's GITHUB_TOKEN",
   "keywords": [
     "semgrep",

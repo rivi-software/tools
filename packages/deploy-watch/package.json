@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/deploy-watch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Moves a browser tab that was open across a deploy onto the new build at a moment that loses nothing: the next navigation loads the whole page, a notice can offer the reload, and an error screen that caught a missing chunk reloads instead",
   "license": "MIT",
   "type": "module",

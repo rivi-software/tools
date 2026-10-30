@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/cloudflare-deploy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deploy helpers for Cloudflare Workers apps: environment guards, a post-deploy health check, a REST API client for D1, KV, R2 and Workers for Platforms, and skew protection that keeps earlier builds' client files served after a deploy",
   "license": "MIT",
   "type": "module",
