@@ -1,5 +1,13 @@
 packages:
   - packages/*
 
+# Dependency build scripts are blocked unless listed here.
+allowBuilds:
+  # posthog-cli (a dependency of @posthog/rollup-plugin, the source map upload in
+  # @rivi-software/posthog-tanstack-start) downloads its binary on first run, not at install.
+  "@posthog/cli": false
+  # core-js only prints a funding message.
+  core-js: false
+
 # Supply-chain policy: no transitive dependencies from git or tarball URLs.
 blockExoticSubdeps: true

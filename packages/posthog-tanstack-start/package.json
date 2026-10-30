@@ -1,0 +1,83 @@
+{
+  "name": "@rivi-software/posthog-tanstack-start",
+  "version": "0.1.0",
+  "description": "PostHog error tracking for TanStack Start apps on Cloudflare Workers: the Worker's capture, the Start middlewares, the browser SDK loaded after hydration, secret-path redaction and the source map upload",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./start": {
+      "types": "./dist/start.d.ts",
+      "default": "./dist/start.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@posthog/rollup-plugin": "^1.6.2"
+  },
+  "peerDependencies": {
+    "@tanstack/react-router": "^1.170.0",
+    "@tanstack/react-start": "^1.169.0",
+    "posthog-js": "^1.438.21",
+    "posthog-node": "^5.57.1",
+    "vite": "^6.0.0 || ^7.0.0 || ^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-router": {
+      "optional": true
+    },
+    "@tanstack/react-start": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@tanstack/react-router": "1.170.46",
+    "@tanstack/react-start": "1.169.4",
+    "posthog-js": "1.438.21",
+    "posthog-node": "5.57.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.5"
+  },
+  "keywords": [
+    "posthog",
+    "error-tracking",
+    "tanstack-start",
+    "tanstack-router",
+    "cloudflare-workers",
+    "source-maps",
+    "vite-plugin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/posthog-tanstack-start"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/posthog-tanstack-start#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}
