@@ -1,35 +1,50 @@
 name: rivi-bot
 
-# rivi-bot reviews pull requests with Claude, through the rivi-bot action (rivi-bot/action.yml).
-# This is a reusable workflow: a repository calls it from a workflow on pull_request_target
+# rivi-bot runs Claude on a repository's pull requests and issues, through the rivi-bot actions
+# (rivi-bot/). This is a reusable workflow: a repository calls it from a workflow of its own
 # (rivi-bot/README.md#setup), as this one does from review.yml. The event, github.token and the
 # repository are the caller's.
 #
-# - A pull request by someone who can write to the repository is reviewed when it opens or leaves
-#   draft, and after every push. Its review approves when nothing has to change.
-# - Any other pull request waits for a maintainer's approval: adding the `rivi-bot:review` label.
-#   The label stays on, so every later push is reviewed too, until a maintainer takes it off.
-#   These reviews only comment: an approval is what a prompt injection would aim for.
-# - A push to a draft is not reviewed; the label still asks for a review of one.
+# What runs is the caller's to choose, in .github/rivi-bot.yml on its default branch
+# (rivi-bot/README.md#configuration): never the pull request's copy, which anyone could edit.
+# Without that file, rivi-bot only reviews pull requests, as below.
 #
-# A review after the first reads only what changed since the last one. Pull requests from forks
-# are reviewed too: pull_request_target runs the calling workflow as it is on the default branch,
-# with the secrets, and the review only reads the pull request; nothing from it runs. Labeling
-# needs triage access, and the gate also checks that whoever added the label can write to the
-# repository. Issues get nothing from rivi-bot for now.
+# - review: a pull request by someone who can write to the repository is reviewed when it opens or
+#   leaves draft, and after every push. Its review approves when nothing has to change. Any other
+#   pull request waits for a maintainer's approval: adding the `rivi-bot:review` label. The label
+#   stays on, so every later push is reviewed too, until a maintainer takes it off. These reviews
+#   only comment: an approval is what a prompt injection would aim for. A push to a draft is not
+#   reviewed; the label still asks for a review of one.
+# - describe: a summary in a pull request's description, and labels, when it opens.
+# - triage: a comment on a new issue, with what the issue needs, and labels.
+# - fix: commits fixes for the open review findings to the pull request's branch, when asked.
+# - ask: answers a question about a pull request or an issue, when asked.
+# - housekeeping: a report on the open issues and pull requests, on the caller's schedule.
+#
+# Someone with write access asks with a comment that starts with `/rivi-bot`: `/rivi-bot review`,
+# `/rivi-bot describe`, `/rivi-bot fix`, `/rivi-bot triage`, `/rivi-bot ask <question>`.
+#
+# Pull requests from forks are reviewed too: pull_request_target runs the calling workflow as it is
+# on the default branch, with the secrets, and nothing from the pull request runs. Labeling needs
+# triage access, and the gate also checks that whoever added the label can write.
 on:
   workflow_call:
     inputs:
       app-client-id:
-        description: The client ID of a GitHub App installed on the repository, with Contents read and Pull requests write. The reviews then come from the App rather than github-actions.
+        description: The client ID of a GitHub App installed on the repository. rivi-bot then posts as the App rather than github-actions, and mints a token per job with only what that job needs.
         type: string
         required: false
         default: ""
       focus:
-        description: What else this repository's reviews look for, added to the list Claude checks.
+        description: What else this repository's reviews look for, added to the list Claude checks. `review.focus` in the configuration file takes its place.
         type: string
         required: false
         default: ""
+      config-path:
+        description: The configuration file, read from the default branch.
+        type: string
+        required: false
+        default: .github/rivi-bot.yml
     secrets:
       anthropic-api-key:
         description: The Anthropic API key Claude runs on, from a workspace with a spend limit.
@@ -38,71 +53,288 @@ on:
         description: The private key of the App named by app-client-id.
         required: false
 
-permissions: {}
+# No permissions at the workflow level: the jobs that declare none take what the caller grants.
+# Declaring a permission the caller does not grant fails the whole run before it starts, so the
+# jobs that need more than review's `contents: read` and `pull-requests: write` (triage, fix,
+# ask, housekeeping) leave it to the caller, who grants it when turning them on.
 
 jobs:
-  # Whether to review this commit, and whether the review may approve.
+  # What this event asks for, whether it may run, and the configuration it runs with.
   gate:
     name: gate
     if: >-
-      (github.event.action == 'labeled' && github.event.label.name == 'rivi-bot:review') ||
-      (github.event.action != 'labeled' && !github.event.pull_request.draft)
+      (github.event_name == 'pull_request_target' &&
+        ((github.event.action == 'labeled' && github.event.label.name == 'rivi-bot:review') ||
+        (github.event.action != 'labeled' && !github.event.pull_request.draft))) ||
+      (github.event_name == 'issues' && github.event.action == 'opened' &&
+        github.event.issue.user.type != 'Bot') ||
+      (github.event_name == 'issue_comment' && github.event.action == 'created' &&
+        github.event.comment.user.type != 'Bot' && startsWith(github.event.comment.body, '/rivi-bot')) ||
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      contents: read # the configuration file
       pull-requests: write # takes off a label that someone without write access added
     outputs:
+      config: ${{ steps.config.outputs.config }}
       review: ${{ steps.check.outputs.review }}
       approve: ${{ steps.check.outputs.approve }}
+      describe: ${{ steps.check.outputs.describe }}
+      triage: ${{ steps.check.outputs.triage }}
+      fix: ${{ steps.check.outputs.fix }}
+      ask: ${{ steps.check.outputs.ask }}
+      housekeeping: ${{ steps.check.outputs.housekeeping }}
+      number: ${{ steps.check.outputs.number }}
+      head-sha: ${{ steps.check.outputs.head-sha }}
+      instructions: ${{ steps.check.outputs.instructions }}
+      comment-id: ${{ steps.check.outputs.comment-id }}
     steps:
-      - name: Check the approval
+      # The file on the default branch, merged over the defaults. A setting of the wrong type
+      # stops here; a key that is not a setting is a warning, so a typo does not go unnoticed.
+      - name: Read the configuration
+        id: config
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFIG_PATH: ${{ inputs.config-path }}
+          FOCUS: ${{ inputs.focus }}
+        run: |
+          set -euo pipefail
+          file='{}'
+          if raw=$(gh api -H 'Accept: application/vnd.github.raw' "repos/$GITHUB_REPOSITORY/contents/$CONFIG_PATH" 2>&1); then
+            if ! file=$(yq -p yaml -o json '. // {}' <<< "$raw"); then
+              echo "::error::$CONFIG_PATH is not valid YAML."
+              exit 1
+            fi
+            echo "Read $CONFIG_PATH from the default branch."
+          elif grep -q 'HTTP 404' <<< "$raw"; then
+            echo "No $CONFIG_PATH on the default branch; the defaults apply."
+          else
+            echo "::error::Could not read $CONFIG_PATH: $raw"
+            exit 1
+          fi
+          checked=$(jq -c --arg focus "$FOCUS" '
+            {
+              model: "claude-opus-5-5",
+              review: {enabled: true, auto: "internal", approve: true, "follow-up": true, focus: $focus, model: ""},
+              describe: {enabled: false, auto: "internal", summary: true, labels: true, instructions: "", model: ""},
+              triage: {enabled: false, auto: "internal", labels: true, duplicates: true, questions: true, plan: true, prompt: true, instructions: "", model: ""},
+              fix: {enabled: false, instructions: "", model: ""},
+              ask: {enabled: false, model: ""},
+              housekeeping: {enabled: false, "stale-days": 30, labels: false, instructions: "", model: ""}
+            } as $defaults
+            # error:… stops the run, warning:… is reported and ignored.
+            | def problems($d; $c; $p):
+                [$c | to_entries[] | .key as $k | .value as $v
+                  | if ($d | has($k) | not) then "warning:\($p)\($k) is not a setting; it is ignored."
+                    elif ($d[$k] | type) == "object" and ($v | type) == "object" then problems($d[$k]; $v; "\($p)\($k).")[]
+                    elif ($v | type) != ($d[$k] | type) then "error:\($p)\($k) should be a \(if ($d[$k] | type) == "object" then "mapping" else $d[$k] | type end)."
+                    else empty end];
+            if type != "object" then {problems: ["error:the file should be a mapping of settings."]}
+            else problems($defaults; .; "") as $problems
+            | if ($problems | any(startswith("error:"))) then {problems: $problems}
+              else ($defaults * with_entries(select(.key as $k | $defaults | has($k)))) as $c
+              | {problems: ($problems + [
+                  ($c | to_entries[] | select(.value | type == "object" and has("auto"))
+                    | select(.value.auto | IN("internal", "everyone", "off") | not)
+                    | "error:\(.key).auto should be internal, everyone or off."),
+                  (if ($c.housekeeping["stale-days"] | . < 1 or . != floor) then "error:housekeeping.stale-days should be a whole number of days." else empty end)
+                ]),
+                # A feature without a model of its own runs on the top-level one.
+                config: ($c | with_entries(if (.value | type) == "object" and .value.model == "" then .value.model = $c.model else . end))}
+              end
+            end' <<< "$file")
+          jq -r --arg path "$CONFIG_PATH" '.problems[] | sub("^error:"; "::error::\($path): ") | sub("^warning:"; "::warning::\($path): ")' <<< "$checked"
+          if jq -e '.problems | any(startswith("error:"))' <<< "$checked" > /dev/null; then exit 1; fi
+          config=$(jq -c .config <<< "$checked")
+          jq -r '[to_entries[] | select(.value | type == "object") | "\(.key): \(if .value.enabled then "on" else "off" end)"] | join(", ")' <<< "$config"
+          echo "config=$config" >> "$GITHUB_OUTPUT"
+
+      - name: Check the event
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
+          CONFIG: ${{ steps.config.outputs.config }}
+          EVENT: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
           SENDER: ${{ github.event.sender.login }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
-          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'rivi-bot:review') }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          LABELED: ${{ contains(github.event.pull_request.labels.*.name, 'rivi-bot:review') }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_AUTHOR: ${{ github.event.issue.user.login }}
+          ON_PR: ${{ github.event.issue.pull_request != null }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT: ${{ github.event.comment.body }}
         run: |
           set -euo pipefail
-          if [ -z "$PR_NUMBER" ]; then
-            echo "::error::Call rivi-bot from a workflow on pull_request_target (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
-            exit 1
-          fi
+          setting() { jq -r "$1" <<< "$CONFIG"; }
           can_write() {
-            case "$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$1/permission" --jq .permission)" in
+            case "$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$1/permission" --jq .permission 2> /dev/null)" in
               admin | maintain | write) return 0 ;;
               *) return 1 ;;
             esac
           }
-          internal=false
-          if can_write "$AUTHOR"; then internal=true; fi
+          # Whether `auto` lets a feature run on its own for this author.
+          auto_for() {
+            case "$(setting ".$1.auto")" in
+              everyone) return 0 ;;
+              internal) [ "$2" = true ] ;;
+              *) return 1 ;;
+            esac
+          }
+          output() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+          output_text() {
+            local delimiter
+            delimiter="EOF_$(openssl rand -hex 8)"
+            printf '%s<<%s\n%s\n%s\n' "$1" "$delimiter" "$2" "$delimiter" >> "$GITHUB_OUTPUT"
+          }
 
-          if [ "$ACTION" = labeled ]; then
-            if ! can_write "$SENDER"; then
-              echo "::error::@$SENDER cannot write to the repository; a maintainer with write access approves reviews."
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/rivi-bot%3Areview" --silent || true
-              exit 1
-            fi
-            echo "@$SENDER approved reviews of #$PR_NUMBER."
-          elif [ "$internal" = true ]; then
-            echo "@$AUTHOR can write to the repository; #$PR_NUMBER is reviewed on every push."
-          elif [ "$LABELED" = true ] &&
-            approver=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/events" --paginate \
-              --jq '.[] | select(.event == "labeled" and .label.name == "rivi-bot:review") | .actor.login' | tail -n 1) &&
-            [ -n "$approver" ] && can_write "$approver"; then
-            # The label is on, and whoever added it last can still write to the repository.
-            echo "@$approver approved reviews of #$PR_NUMBER."
-          else
-            echo "#$PR_NUMBER waits for a maintainer to add the rivi-bot:review label."
-            echo "review=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          {
-            echo "review=true"
-            echo "approve=$internal"
-          } >> "$GITHUB_OUTPUT"
+          case "$EVENT" in
+            pull_request_target)
+              if [ -z "$PR_NUMBER" ]; then
+                echo "::error::Call rivi-bot from a workflow on pull_request_target (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
+                exit 1
+              fi
+              output number "$PR_NUMBER"
+              output head-sha "$PR_HEAD"
+              internal=false
+              if can_write "$PR_AUTHOR"; then internal=true; fi
+
+              if [ "$(setting .review.enabled)" = true ]; then
+                review=false
+                if [ "$ACTION" = labeled ]; then
+                  if ! can_write "$SENDER"; then
+                    echo "::error::@$SENDER cannot write to the repository; a maintainer with write access approves reviews."
+                    gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/rivi-bot%3Areview" --silent || true
+                    exit 1
+                  fi
+                  echo "@$SENDER approved reviews of #$PR_NUMBER."
+                  review=true
+                elif auto_for review "$internal"; then
+                  echo "#$PR_NUMBER is reviewed on every push (review.auto: $(setting .review.auto))."
+                  review=true
+                elif [ "$LABELED" = true ] &&
+                  approver=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/events" --paginate \
+                    --jq '.[] | select(.event == "labeled" and .label.name == "rivi-bot:review") | .actor.login' | tail -n 1) &&
+                  [ -n "$approver" ] && can_write "$approver"; then
+                  # The label is on, and whoever added it last can still write to the repository.
+                  echo "@$approver approved reviews of #$PR_NUMBER."
+                  review=true
+                else
+                  echo "#$PR_NUMBER waits for a maintainer to add the rivi-bot:review label."
+                fi
+                if [ "$review" = true ]; then
+                  output review true
+                  output approve "$([ "$internal" = true ] && setting .review.approve || echo false)"
+                fi
+              fi
+
+              # A summary when the pull request opens; a push does not redo it.
+              if [ "$(setting .describe.enabled)" = true ] &&
+                case "$ACTION" in opened | reopened | ready_for_review) true ;; *) false ;; esac; then
+                if auto_for describe "$internal"; then
+                  output describe true
+                else
+                  echo "#$PR_NUMBER is not described on its own (describe.auto: $(setting .describe.auto)); /rivi-bot describe asks for it."
+                fi
+              fi
+              ;;
+
+            issues)
+              output number "$ISSUE_NUMBER"
+              if [ "$(setting .triage.enabled)" != true ]; then
+                echo "Triage is off."
+              else
+                internal=false
+                if can_write "$ISSUE_AUTHOR"; then internal=true; fi
+                if auto_for triage "$internal"; then
+                  output triage true
+                else
+                  echo "#$ISSUE_NUMBER is not triaged on its own (triage.auto: $(setting .triage.auto)); /rivi-bot triage asks for it."
+                fi
+              fi
+              ;;
+
+            issue_comment)
+              # `/rivi-bot <command> <text>`: the text runs to the end of the comment.
+              body=${COMMENT//$'\r'/}
+              first=${body%%$'\n'*}
+              more=""
+              if [ "$first" != "$body" ]; then more=${body#*$'\n'}; fi
+              read -r slash command text <<< "$first" || true
+              command=$(tr '[:upper:]' '[:lower:]' <<< "${command:-}")
+              text=$(printf '%s\n%s' "${text:-}" "$more" | sed -e '/./,$!d')
+              if [ "$slash" != /rivi-bot ]; then
+                echo "Not a rivi-bot command."
+                exit 0
+              fi
+              if ! can_write "$SENDER"; then
+                echo "@$SENDER cannot write to the repository; only maintainers give rivi-bot commands."
+                exit 0
+              fi
+              output number "$ISSUE_NUMBER"
+              output_text instructions "$text"
+
+              target=issue
+              if [ "$ON_PR" = true ]; then target=pull_request; fi
+              case "$target:$command" in
+                pull_request:review | pull_request:describe | pull_request:fix | issue:triage | *:ask) ;;
+                *)
+                  echo "::warning::${command:+/rivi-bot $command is not a command on a ${target/_/ }. }The commands on a pull request are review, describe, fix and ask; on an issue, triage and ask."
+                  exit 0
+                  ;;
+              esac
+              if [ "$(setting ".$command.enabled")" != true ]; then
+                echo "::warning::/rivi-bot $command is off; $command.enabled in the configuration turns it on."
+                exit 0
+              fi
+              if [ "$command" = ask ] && [ -z "$text" ]; then
+                echo "::warning::/rivi-bot ask needs a question."
+                exit 0
+              fi
+
+              if [ "$target" = pull_request ]; then
+                pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$ISSUE_NUMBER")
+                output head-sha "$(jq -r .head.sha <<< "$pr")"
+                if [ "$command" = review ]; then
+                  # One review of the head as it is now, by a maintainer's request: the same
+                  # approval as the label, good for this review only.
+                  internal=false
+                  if can_write "$(jq -r .user.login <<< "$pr")"; then internal=true; fi
+                  output approve "$([ "$internal" = true ] && setting .review.approve || echo false)"
+                fi
+              fi
+              echo "@$SENDER asked for /rivi-bot $command on #$ISSUE_NUMBER."
+              output comment-id "$COMMENT_ID"
+              output "$command" true
+              ;;
+
+            schedule | workflow_dispatch)
+              if [ "$(setting .housekeeping.enabled)" = true ]; then
+                output housekeeping true
+              else
+                echo "Housekeeping is off."
+              fi
+              ;;
+          esac
+
+  # A command is seen: the comment gets an eyes reaction while the job it asked for runs.
+  acknowledge:
+    name: acknowledge
+    needs: gate
+    if: needs.gate.outputs.comment-id != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: React to the command
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ needs.gate.outputs.comment-id }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" -f content=eyes --silent ||
+            echo "::warning::Could not react to the command; the job it asked for runs all the same."
 
   review:
     name: review
@@ -113,7 +345,7 @@ jobs:
     # One review of a pull request at a time; none that started is cancelled, since a
     # half-posted review helps nobody. Of the pushes that wait, only the latest is reviewed.
     concurrency:
-      group: rivi-bot-review-${{ github.event.pull_request.number }}
+      group: rivi-bot-review-${{ needs.gate.outputs.number }}
       cancel-in-progress: false
     permissions:
       contents: read
@@ -148,18 +380,242 @@ jobs:
           anthropic-api-key: ${{ secrets.anthropic-api-key }}
           github-token: ${{ steps.app.outputs.token || github.token }}
           reviewer: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
-          pull-request: ${{ github.event.pull_request.number }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
+          pull-request: ${{ needs.gate.outputs.number }}
+          head-sha: ${{ needs.gate.outputs.head-sha }}
           approve: ${{ needs.gate.outputs.approve }}
-          focus: ${{ inputs.focus }}
+          follow-up: ${{ fromJSON(needs.gate.outputs.config).review['follow-up'] }}
+          focus: ${{ fromJSON(needs.gate.outputs.config).review.focus }}
+          instructions: ${{ needs.gate.outputs.instructions }}
+          model: ${{ fromJSON(needs.gate.outputs.config).review.model }}
 
       - name: Report a failed review
         if: failure() && steps.review.conclusion == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ needs.gate.outputs.number }}
+          HEAD_SHA: ${{ needs.gate.outputs.head-sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --body "rivi-bot could not review $HEAD_SHA ([the run]($RUN_URL)). A maintainer can re-run it."
+
+  describe:
+    name: describe
+    needs: gate
+    if: needs.gate.outputs.describe == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: rivi-bot-describe-${{ needs.gate.outputs.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Get the App's token
+        id: app
+        if: inputs.app-client-id != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Describe
+        uses: rivi-software/tools/rivi-bot/describe@main
+        with:
+          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          github-token: ${{ steps.app.outputs.token || github.token }}
+          pull-request: ${{ needs.gate.outputs.number }}
+          head-sha: ${{ needs.gate.outputs.head-sha }}
+          summary: ${{ fromJSON(needs.gate.outputs.config).describe.summary }}
+          labels: ${{ fromJSON(needs.gate.outputs.config).describe.labels }}
+          instructions: ${{ fromJSON(needs.gate.outputs.config).describe.instructions }}
+          model: ${{ fromJSON(needs.gate.outputs.config).describe.model }}
+
+  # Needs `issues: write` from the caller.
+  triage:
+    name: triage
+    needs: gate
+    if: needs.gate.outputs.triage == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: rivi-bot-triage-${{ needs.gate.outputs.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Get the App's token
+        id: app
+        if: inputs.app-client-id != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: read
+          permission-issues: write
+
+      - name: Triage
+        uses: rivi-software/tools/rivi-bot/triage@main
+        with:
+          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          github-token: ${{ steps.app.outputs.token || github.token }}
+          login: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
+          issue: ${{ needs.gate.outputs.number }}
+          labels: ${{ fromJSON(needs.gate.outputs.config).triage.labels }}
+          duplicates: ${{ fromJSON(needs.gate.outputs.config).triage.duplicates }}
+          questions: ${{ fromJSON(needs.gate.outputs.config).triage.questions }}
+          plan: ${{ fromJSON(needs.gate.outputs.config).triage.plan }}
+          prompt: ${{ fromJSON(needs.gate.outputs.config).triage.prompt }}
+          instructions: ${{ format('{0}{1}{2}', fromJSON(needs.gate.outputs.config).triage.instructions, needs.gate.outputs.instructions && ' ' || '', needs.gate.outputs.instructions) }}
+          model: ${{ fromJSON(needs.gate.outputs.config).triage.model }}
+
+  # Claude edits a checkout of the pull request with a read-only token; the patch it leaves is
+  # pushed by the next job, which never runs Claude. Whatever the run of Claude leaves behind on
+  # its runner cannot reach the token that pushes.
+  fix:
+    name: fix
+    needs: gate
+    if: needs.gate.outputs.fix == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: rivi-bot-fix-${{ needs.gate.outputs.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      patch: ${{ steps.fix.outputs.patch }}
+      head-sha: ${{ steps.fix.outputs.head-sha }}
+      head-ref: ${{ steps.fix.outputs.head-ref }}
+      title: ${{ steps.fix.outputs.title }}
+      summary: ${{ steps.fix.outputs.summary }}
+    steps:
+      - name: Get the App's token
+        id: app
+        if: inputs.app-client-id != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: read
+          permission-pull-requests: read
+
+      - name: Fix
+        id: fix
+        uses: rivi-software/tools/rivi-bot/fix@main
+        with:
+          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          github-token: ${{ steps.app.outputs.token || github.token }}
+          reviewer: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
+          pull-request: ${{ needs.gate.outputs.number }}
+          instructions: ${{ format('{0}{1}{2}', fromJSON(needs.gate.outputs.config).fix.instructions, needs.gate.outputs.instructions && ' ' || '', needs.gate.outputs.instructions) }}
+          model: ${{ fromJSON(needs.gate.outputs.config).fix.model }}
+
+  # Needs `contents: write` (and `pull-requests: write`) from the caller.
+  fix-push:
+    name: fix-push
+    needs: [gate, fix]
+    if: always() && needs.gate.outputs.fix == 'true' && needs.fix.result != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: rivi-bot-fix-${{ needs.gate.outputs.number }}-push
+      cancel-in-progress: false
+    steps:
+      - name: Get the App's token
+        id: app
+        if: inputs.app-client-id != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Push the fix
+        if: needs.fix.result == 'success'
+        uses: rivi-software/tools/rivi-bot/fix/push@main
+        with:
+          github-token: ${{ steps.app.outputs.token || github.token }}
+          login: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
+          pull-request: ${{ needs.gate.outputs.number }}
+          head-ref: ${{ needs.fix.outputs.head-ref }}
+          head-sha: ${{ needs.fix.outputs.head-sha }}
+          patch: ${{ needs.fix.outputs.patch }}
+          title: ${{ needs.fix.outputs.title }}
+          summary: ${{ needs.fix.outputs.summary }}
+
+      - name: Report a failed fix
+        if: failure() || needs.fix.result != 'success'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          PR_NUMBER: ${{ needs.gate.outputs.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "rivi-bot could not fix #$PR_NUMBER ([the run]($RUN_URL)). A maintainer can re-run it or ask again."
+
+  # Needs `issues: write` from the caller, or `pull-requests: write` for a question on a pull
+  # request.
+  ask:
+    name: ask
+    needs: gate
+    if: needs.gate.outputs.ask == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Get the App's token
+        id: app
+        if: inputs.app-client-id != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: write
+
+      - name: Answer
+        uses: rivi-software/tools/rivi-bot/ask@main
+        with:
+          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          github-token: ${{ steps.app.outputs.token || github.token }}
+          number: ${{ needs.gate.outputs.number }}
+          head-sha: ${{ needs.gate.outputs.head-sha }}
+          question: ${{ needs.gate.outputs.instructions }}
+          model: ${{ fromJSON(needs.gate.outputs.config).ask.model }}
+
+  # Needs `issues: write` from the caller.
+  housekeeping:
+    name: housekeeping
+    needs: gate
+    if: needs.gate.outputs.housekeeping == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: rivi-bot-housekeeping
+      cancel-in-progress: false
+    steps:
+      - name: Get the App's token
+        id: app
+        if: inputs.app-client-id != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ inputs.app-client-id }}
+          private-key: ${{ secrets.app-private-key }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: read
+
+      - name: Housekeeping
+        uses: rivi-software/tools/rivi-bot/housekeeping@main
+        with:
+          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          github-token: ${{ steps.app.outputs.token || github.token }}
+          login: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
+          stale-days: ${{ fromJSON(needs.gate.outputs.config).housekeeping['stale-days'] }}
+          labels: ${{ fromJSON(needs.gate.outputs.config).housekeeping.labels }}
+          instructions: ${{ fromJSON(needs.gate.outputs.config).housekeeping.instructions }}
+          model: ${{ fromJSON(needs.gate.outputs.config).housekeeping.model }}

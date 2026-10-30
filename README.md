@@ -17,7 +17,7 @@ Each is published as `@rivi-software/<name>`. They are ESM only and ship JavaScr
 
 ## rivi-bot
 
-[`rivi-bot`](rivi-bot#readme) is a GitHub Action and a reusable workflow rather than a package: a pull request review by Claude, run once a maintainer approves it.
+[`rivi-bot`](rivi-bot#readme) is a set of GitHub Actions and a reusable workflow rather than a package: Claude on a repository's pull requests and issues. It reviews pull requests, and, where a repository turns them on, describes them, triages issues, fixes review findings, answers questions and reports on the backlog.
 
 ## Contributing
 

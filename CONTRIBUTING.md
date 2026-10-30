@@ -139,7 +139,7 @@ A relative import names the file the build emits, `./util.js` for `src/util.ts`:
 ### Pull requests from forks
 
 - **CI runs.** Read the diff before you approve a CI run for a first-time contributor. CI runs the pull request's own code: its install, tests, build and scripts. It gets a read-only token and no secrets, but nothing should run that nobody has read. Look hardest at `.github/`, `scripts/`, the `scripts` in a `package.json` and `pnpm-workspace.yaml`.
-- **Secrets.** No workflow runs a fork's code with secrets. A workflow on `pull_request_target` has them, so it must not check out the pull request and run it; [rivi-bot's](.github/workflows/rivi-bot.yml) only reads the code it checks out.
+- **Secrets.** No workflow runs a fork's code with secrets. A workflow on `pull_request_target` has them, so it must not check out the pull request and run it; [rivi-bot's](.github/workflows/rivi-bot.yml) never runs the code it checks out.
 - **Small fixes.** When a pull request lacks only a changeset or a Conventional Commits title, push the changeset to the branch or edit the title yourself. Don't send the contributor round again.
 
 ### Reviews by rivi-bot
@@ -150,7 +150,7 @@ Any other pull request waits for a maintainer, who asks for reviews by adding th
 
 A review after the first reads only what changed since the last one. A push to a draft is not reviewed, but the label still asks for a review of a draft. Either way the review is advice: a maintainer still approves and merges.
 
-The workflow ([`.github/workflows/review.yml`](.github/workflows/review.yml)) calls the reusable one in [`.github/workflows/rivi-bot.yml`](.github/workflows/rivi-bot.yml), and needs the `ANTHROPIC_REVIEW_API_KEY` secret. With the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret of an App installed here, the reviews come from that App rather than `github-actions`. Other repositories call `rivi-bot.yml` at `main`, so a change to it or to `rivi-bot/action.yml` reaches them as soon as it merges.
+The workflow ([`.github/workflows/review.yml`](.github/workflows/review.yml)) calls the reusable one in [`.github/workflows/rivi-bot.yml`](.github/workflows/rivi-bot.yml), and needs the `ANTHROPIC_REVIEW_API_KEY` secret. With the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret of an App installed here, the reviews come from that App rather than `github-actions`. Other repositories call `rivi-bot.yml` at `main`, so a change to it or to an action in `rivi-bot/` reaches them as soon as it merges.
 
 ### Changes and releases
 
