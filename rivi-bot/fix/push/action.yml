@@ -1,0 +1,139 @@
+name: rivi-bot fix push
+description: Commits the patch rivi-bot/fix left onto the pull request's branch, and comments with what it fixed
+author: RIVI Software
+branding:
+  icon: git-commit
+  color: purple
+
+# Run in a job of its own, after the job that ran rivi-bot/fix: this one holds the token that
+# pushes, and never runs Claude. It pushes only onto the commit the fix was made on, never with
+# force, and nothing under .github/.
+
+inputs:
+  github-token:
+    description: Pushes the fix and comments on the pull request. Needs contents write and pull-requests write. A push with github.token starts no workflows; with a GitHub App's installation token, CI runs on the fix.
+    required: false
+    default: ${{ github.token }}
+  login:
+    description: The login `github-token` acts as, such as `my-app[bot]`; the fix is committed in its name.
+    required: false
+    default: github-actions[bot]
+  pull-request:
+    description: The number of the pull request.
+    required: true
+  head-ref:
+    description: The pull request's branch (rivi-bot/fix's head-ref output).
+    required: false
+    default: ""
+  head-sha:
+    description: The commit the patch applies to (rivi-bot/fix's head-sha output).
+    required: false
+    default: ""
+  patch:
+    description: rivi-bot/fix's patch output.
+    required: false
+    default: ""
+  title:
+    description: The commit title (rivi-bot/fix's title output).
+    required: false
+    default: "fix: address review findings"
+  summary:
+    description: What was fixed and what was left (rivi-bot/fix's summary output).
+    required: false
+    default: ""
+
+outputs:
+  commit:
+    description: The commit pushed; empty when nothing was.
+    value: ${{ steps.push.outputs.commit }}
+
+runs:
+  using: composite
+  steps:
+    # The patch was made on head-sha; if the branch has moved on since, it is not pushed.
+    - name: Check the branch
+      id: branch
+      if: inputs.patch != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        HEAD_REF: ${{ inputs.head-ref }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+      run: |
+        set -euo pipefail
+        if [ -z "$HEAD_REF" ] || [ -z "$HEAD_SHA" ]; then
+          echo "::error::Pass rivi-bot/fix's head-ref and head-sha outputs with its patch."
+          exit 1
+        fi
+        current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$HEAD_REF" --jq .object.sha)
+        if [ "$current" != "$HEAD_SHA" ]; then
+          echo "$HEAD_REF has moved on from $HEAD_SHA to $current; the fix is not pushed."
+          echo "moved=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Check out the branch
+      if: inputs.patch != '' && steps.branch.outputs.moved != 'true'
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        ref: ${{ inputs.head-sha }}
+        token: ${{ inputs.github-token }}
+        fetch-depth: 1
+        persist-credentials: false
+
+    # Hooks are off: the checkout is the pull request's, and nothing from it runs.
+    - name: Commit and push
+      id: push
+      if: inputs.patch != '' && steps.branch.outputs.moved != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        LOGIN: ${{ inputs.login }}
+        HEAD_REF: ${{ inputs.head-ref }}
+        PATCH: ${{ inputs.patch }}
+        TITLE: ${{ inputs.title }}
+      run: |
+        set -euo pipefail
+        patch_file="$RUNNER_TEMP/rivi-bot-fix.patch"
+        base64 -d <<< "$PATCH" | gunzip > "$patch_file"
+        git apply --index --whitespace=nowarn "$patch_file"
+        if git diff --cached --name-only --no-renames | grep -q '^\.github/'; then
+          echo "::error::The patch changes .github/; a fix may not change the workflows."
+          exit 1
+        fi
+        path=${LOGIN//\[/%5B}
+        id=$(gh api "users/${path//\]/%5D}" --jq .id 2> /dev/null || true)
+        git -c core.hooksPath=/dev/null -c user.name="$LOGIN" -c user.email="${id:+$id+}$LOGIN@users.noreply.github.com" \
+          commit --quiet --no-verify -m "${TITLE:-fix: address review findings}"
+        git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+          push --quiet origin "HEAD:refs/heads/$HEAD_REF"
+        commit=$(git rev-parse HEAD)
+        echo "Pushed $commit to $HEAD_REF."
+        echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+    - name: Comment
+      if: always() && (steps.push.outputs.commit != '' || steps.branch.outputs.moved == 'true' || inputs.patch == '')
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        LOGIN: ${{ inputs.login }}
+        PR_NUMBER: ${{ inputs.pull-request }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        COMMIT: ${{ steps.push.outputs.commit }}
+        MOVED: ${{ steps.branch.outputs.moved }}
+        SUMMARY: ${{ inputs.summary }}
+      run: |
+        set -euo pipefail
+        if [ -n "$COMMIT" ]; then
+          note="Nothing was run to check it: read the change, and let CI test it."
+          if [ "$LOGIN" = "github-actions[bot]" ]; then
+            note+=" A push by github-actions starts no workflows, so CI runs on the next push."
+          fi
+          body=$(printf 'rivi-bot pushed %s with fixes.\n\n%s\n\n<sub>%s</sub>' "$COMMIT" "$SUMMARY" "$note")
+        elif [ "$MOVED" = true ]; then
+          body="The branch moved on from $HEAD_SHA while rivi-bot worked on it, so the fix was not pushed. \`/rivi-bot fix\` tries again on the new head."
+        elif [ -n "$SUMMARY" ]; then
+          body=$SUMMARY
+        else
+          exit 0
+        fi
+        gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
