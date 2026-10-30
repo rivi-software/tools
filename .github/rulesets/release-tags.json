@@ -1,0 +1,13 @@
+{
+  "name": "release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/tags/@rivi-software/*", "refs/tags/rivi-bot-v*"],
+      "exclude": []
+    }
+  },
+  "bypass_actors": [],
+  "rules": [{ "type": "deletion" }, { "type": "update" }]
+}
