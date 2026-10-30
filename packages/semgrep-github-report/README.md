@@ -169,6 +169,10 @@ const markdown = formatFindingsSummary(findings, { repository: "acme/app", sha: 
 - **JSON only.** It reads the JSON output of `semgrep scan`, not SARIF.
 - **Findings do not fail the check.** It exits 0 whatever it finds. To fail on findings, add `--error` to `semgrep scan`, which then exits 1 when it finds something, and write the report steps' conditions as `${{ !cancelled() && … }}` so they still run.
 
+## Development
+
+The tests in `tests/` cover the formatting (`index.test.ts`), the command against a stand-in for GitHub's API (`main.test.ts`: finding the comment past the first 100, creating and updating it, a fork's 403, the job summary, the options) and the command as Node runs it (`cli.test.ts`). None of them calls GitHub. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+
 ## License
 
 [MIT](LICENSE)
