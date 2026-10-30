@@ -1,0 +1,96 @@
+name: rivi-bot
+
+# rivi-bot reviews a pull request once a maintainer approves: adding the `rivi-bot:review` label
+# is the approval. It reviews the commit that was labeled, with Claude through the rivi-bot
+# action (rivi-bot/action.yml), then takes the label off, so a later push needs a new approval.
+#
+# Pull requests from forks are reviewed too: pull_request_target runs this file as it is on main,
+# with the secrets, and the review only reads the pull request; nothing from it runs. Labeling
+# needs triage access, and the review also checks that whoever added the label can write to the
+# repository. Issues get nothing from rivi-bot for now.
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  review:
+    name: review
+    if: github.event.label.name == 'rivi-bot:review'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # One review of a pull request at a time; none that started is cancelled, since a
+    # half-posted review helps nobody.
+    concurrency:
+      group: rivi-bot-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check the approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SENDER: ${{ github.event.sender.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$SENDER/permission" --jq .permission)
+          case "$permission" in
+            admin | maintain | write) echo "@$SENDER ($permission) approved a review of #$PR_NUMBER." ;;
+            *)
+              echo "::error::@$SENDER has $permission access; a maintainer with write access approves a review."
+              exit 1
+              ;;
+          esac
+
+      - name: Check the credentials
+        env:
+          KEY_SET: ${{ secrets.ANTHROPIC_REVIEW_API_KEY != '' }}
+        run: |
+          if [ "$KEY_SET" != "true" ]; then
+            echo "::error::Set the ANTHROPIC_REVIEW_API_KEY Actions secret (rivi-bot/README.md#setup)."
+            exit 1
+          fi
+
+      # The review comes from the RIVI Bot App where it is installed, else from github-actions.
+      - name: Get the App's token
+        id: app
+        if: vars.AUTOMATION_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      # The action as it is on main, like this file: never the pull request's version.
+      - name: Review
+        id: review
+        uses: rivi-software/tools/rivi-bot@main
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
+          github-token: ${{ steps.app.outputs.token || github.token }}
+          reviewer: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
+          pull-request: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+
+      - name: Report a failed review
+        if: failure() && steps.review.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "rivi-bot could not review $HEAD_SHA ([the run]($RUN_URL)). Add the \`rivi-bot:review\` label again to retry."
+
+      # One label, one review: a later push needs a maintainer's approval again.
+      - name: Take the label off
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/rivi-bot%3Areview" --silent || true
