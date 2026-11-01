@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import {
+  type BuildFile,
   CHECK_SPACING_MS,
   CHUNK_RETRY_KEY,
   createDeployWatch,
@@ -17,8 +18,11 @@ function memoryStorage(entries: Record<string, string> = {}) {
   };
 }
 
-/** A tab on build `a`, whose `/build.json` answers `live` and whose clock the test moves. */
-function tab({ live = "a" as string | null | Error, storage = memoryStorage() } = {}) {
+/**
+ * A tab on build `a`, whose `/build.json` answers `live` (a bare id is a file with only the id)
+ * and whose clock the test moves.
+ */
+function tab({ live = "a" as string | BuildFile | null | Error, storage = memoryStorage() } = {}) {
   let time = 1_000_000;
   const loads: (string | undefined)[] = [];
   const state = { live, fetches: 0 };
@@ -27,7 +31,7 @@ function tab({ live = "a" as string | null | Error, storage = memoryStorage() } 
     fetchLive: async () => {
       state.fetches++;
       if (state.live instanceof Error) throw state.live;
-      return state.live;
+      return typeof state.live === "string" ? { id: state.live } : state.live;
     },
     now: () => time,
     storage,
@@ -141,7 +145,7 @@ test("a chunk of the live build that failed reloads the page once for that build
   // A later build gets its own reload.
   const later = createDeployWatch({
     current: "b",
-    fetchLive: async () => "b",
+    fetchLive: async () => ({ id: "b" }),
     now: () => 0,
     storage: first.storage,
     load: () => {},
@@ -153,13 +157,94 @@ test("a chunk of the live build that failed reloads the page once for that build
   expect(await offline.watch.recover(chunk)).toBe(false);
   const unstored = createDeployWatch({
     current: "a",
-    fetchLive: async () => "a",
+    fetchLive: async () => ({ id: "a" }),
     now: () => 0,
     storage: null,
     load: () => {},
   });
   expect(await unstored.recover(chunk)).toBe(false);
   expect(unstored.isReloading()).toBe(false);
+});
+
+test("a deploy that leaves the page's browser code as it was is not new, once the tab knows it", async () => {
+  const { watch, state, advance } = tab({ live: { id: "a", client: "c1" } });
+  watch.learnOwnBuild();
+  expect(await watch.check({ force: true })).toBe(false);
+  // A commit that changed only the server.
+  state.live = { id: "b", client: "c1" };
+  advance(CHECK_SPACING_MS);
+  expect(await watch.check()).toBe(false);
+  expect(watch.isNew()).toBe(false);
+  // One that changed the browser code.
+  state.live = { id: "c", client: "c2" };
+  advance(CHECK_SPACING_MS);
+  expect(await watch.check()).toBe(true);
+  // A tab that never read its own build's file cannot tell, and takes it as new.
+  const unaware = tab({ live: { id: "b", client: "c1" } });
+  expect(await unaware.watch.check({ force: true })).toBe(true);
+});
+
+test("the page's own build is read once, unless a check already read the file", async () => {
+  const { watch, state } = tab({ live: { id: "a", client: "c1" } });
+  watch.learnOwnBuild();
+  watch.learnOwnBuild();
+  await watch.check({ force: true });
+  expect(state.fetches).toBe(1);
+  const checked = tab({ live: { id: "a", client: "c1" } });
+  await checked.watch.check({ force: true });
+  checked.watch.learnOwnBuild();
+  expect(checked.state.fetches).toBe(1);
+});
+
+test("a module changes only when the newer build's fingerprint for it differs", async () => {
+  const own = { id: "a", client: "c1", modules: { inbox: "i1", kb: "k1" } };
+  const { watch, state, advance } = tab({ live: own });
+  let told = 0;
+  watch.subscribe(() => told++);
+  await watch.check({ force: true });
+  expect(watch.changes("kb")).toBe(false);
+  state.live = { id: "b", client: "c2", modules: { inbox: "i1", kb: "k2" } };
+  advance(CHECK_SPACING_MS);
+  await watch.check();
+  expect(watch.changes("kb")).toBe(true);
+  expect(watch.changes("inbox")).toBe(false);
+  // A name neither build has: no code of its own beyond the page that loads it.
+  expect(watch.changes("billing")).toBe(false);
+  // A later deploy can change the module the page shows, and the tab learns of it.
+  state.live = { id: "c", client: "c3", modules: { inbox: "i2", kb: "k2" } };
+  advance(CHECK_SPACING_MS);
+  expect(await watch.check()).toBe(true);
+  expect(watch.changes("inbox")).toBe(true);
+  expect(state.fetches).toBe(3);
+  expect(told).toBe(3);
+});
+
+test("a tab that cannot compare a module takes it as changed", async () => {
+  const newer = { id: "b", client: "c2", modules: { inbox: "i1" } };
+  // It never read its own build's file.
+  const unaware = tab({ live: newer });
+  await unaware.watch.check({ force: true });
+  expect(unaware.watch.changes("inbox")).toBe(true);
+  // Its own build's file names no modules.
+  const older = tab({ live: { id: "a", client: "c1" } });
+  older.watch.learnOwnBuild();
+  await older.watch.check({ force: true });
+  older.state.live = newer;
+  older.advance(CHECK_SPACING_MS);
+  await older.watch.check();
+  expect(older.watch.changes("inbox")).toBe(true);
+});
+
+test("a chunk that failed while the live build has the page's browser code reloads once", async () => {
+  const chunk = new TypeError("Failed to fetch dynamically imported module: /assets/x.js");
+  const { watch, state, loads, storage } = tab({ live: { id: "a", client: "c1" } });
+  watch.learnOwnBuild();
+  await watch.check({ force: true });
+  // A deploy that changed only the server: the chunk is still on the server.
+  state.live = { id: "b", client: "c1" };
+  expect(await watch.recover(chunk)).toBe(true);
+  expect(loads).toEqual([undefined]);
+  expect(storage.getItem(CHUNK_RETRY_KEY)).toBe("a");
 });
 
 test("the router's next move to another page loads it whole once a newer build is live", async () => {
@@ -187,8 +272,14 @@ test("the router's next move to another page loads it whole once a newer build i
   expect(steps).toEqual(["flush after 0 loads"]);
 });
 
-test("reads the id from /build.json and nothing else", () => {
-  expect(parseBuildFile({ id: "abc123" })).toBe("abc123");
+test("reads the build from /build.json and nothing else", () => {
+  expect(parseBuildFile({ id: "abc123" })).toEqual({ id: "abc123" });
+  expect(parseBuildFile({ id: "abc123", client: "c1", modules: { inbox: "m1", kb: 2 } })).toEqual({
+    id: "abc123",
+    client: "c1",
+    modules: { inbox: "m1" },
+  });
+  expect(parseBuildFile({ id: "abc123", client: 1, modules: ["m1"] })).toEqual({ id: "abc123" });
   expect(parseBuildFile({ id: "" })).toBeNull();
   expect(parseBuildFile({ id: 1 })).toBeNull();
   expect(parseBuildFile("abc123")).toBeNull();
