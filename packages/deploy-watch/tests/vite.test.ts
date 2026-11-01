@@ -34,8 +34,13 @@ test("a build gives the server its id and the browser's assets /build.json", () 
   });
   build.bundle("ssr");
   build.bundle("client");
+  // With the id, the browser code's fingerprint: here, of an empty bundle.
   expect(build.emitted).toEqual([
-    { type: "asset", fileName: "build.json", source: '{"id":"abc123"}\n' },
+    {
+      type: "asset",
+      fileName: "build.json",
+      source: '{"id":"abc123","client":"e3b0c44298fc1c14"}\n',
+    },
   ]);
 });
 

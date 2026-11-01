@@ -86,5 +86,120 @@ test("a browser build under another base reads build.json there, and never holds
   expect(code).toContain("/app/build.json");
   expect(code).not.toContain("abc123");
   const asset = files.find((file) => file.fileName === "build.json");
-  expect(asset && "source" in asset ? String(asset.source) : "").toBe('{"id":"abc123"}\n');
+  const file = JSON.parse(asset && "source" in asset ? String(asset.source) : "{}");
+  expect(file).toEqual({ id: "abc123", client: expect.stringMatching(/^[0-9a-f]{16}$/) });
 });
+
+/**
+ * An app with a shell and two lazily loaded modules, each of which loads a dialog lazily. Inbox
+ * and its dialog share a helper with the help center, which also imports what the shell has.
+ */
+const APP: Record<string, string> = {
+  "main.js": [
+    'import { greet } from "./shared.js";',
+    'const open = (name) => name === "inbox" ? import("./modules/inbox.js") : import("./modules/kb.js");',
+    "document.body.onclick = () => open(location.hash).then((module) => module.render());",
+    "console.log(greet('shell'));",
+  ].join("\n"),
+  "shared.js": "export const greet = (who) => `hello ${who}`;",
+  "modules/inbox.js": [
+    'import { greet } from "../shared.js";',
+    'import { format } from "./format.js";',
+    "export const render = () => format(greet('inbox'));",
+    'export const dialog = () => import("./inbox-dialog.js");',
+  ].join("\n"),
+  "modules/inbox-dialog.js": 'export const text = "Inbox dialog";',
+  "modules/kb.js": [
+    'import { format } from "./format.js";',
+    "export const render = () => format('Help center');",
+  ].join("\n"),
+  "modules/format.js": "export const format = (text) => `[${text}]`;",
+};
+
+type BuildFileBody = { id: string; client: string; modules?: Record<string, string> };
+
+/** Builds `APP` with `changes` applied, and reads its `build.json`; `seen` collects what `modules` saw. */
+async function buildApp(
+  changes: Record<string, string> = {},
+  seen: { id: string; importers: readonly string[] }[] = [],
+  buildId = "abc123",
+): Promise<BuildFileBody> {
+  const app = mkdtempSync(join(tmpdir(), "deploy-watch-app-"));
+  try {
+    for (const [file, code] of Object.entries({ ...APP, ...changes })) {
+      mkdirSync(join(app, file, ".."), { recursive: true });
+      writeFileSync(join(app, file), code);
+    }
+    const result = await build({
+      root: app,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [
+        deployWatch({
+          buildId,
+          modules: (file) => {
+            seen.push(file);
+            return /^modules\/(inbox|kb)\.js$/.exec(file.id)?.[1];
+          },
+        }),
+      ],
+      build: { write: false, minify: true, rollupOptions: { input: join(app, "main.js") } },
+    });
+    const files = (Array.isArray(result) ? result : [result]).flatMap((output) =>
+      "output" in output ? output.output : [],
+    );
+    const asset = files.find((file) => file.fileName === "build.json");
+    return JSON.parse(asset && "source" in asset ? String(asset.source) : "{}");
+  } finally {
+    rmSync(app, { recursive: true, force: true });
+  }
+}
+
+test("each named module's fingerprint changes only with the code it adds to the page", async () => {
+  const seen: { id: string; importers: readonly string[] }[] = [];
+  const before = await buildApp({}, seen);
+  // `modules` sees each lazily loaded file from the project root, with its lazy importers.
+  expect(seen).toEqual(
+    expect.arrayContaining([
+      { id: "modules/inbox.js", importers: ["main.js"] },
+      { id: "modules/kb.js", importers: ["main.js"] },
+      { id: "modules/inbox-dialog.js", importers: ["modules/inbox.js"] },
+    ]),
+  );
+  expect(Object.keys(before.modules ?? {})).toEqual(["inbox", "kb"]);
+  // Another build of the same code has the same fingerprints.
+  expect(await buildApp()).toEqual(before);
+
+  // The inbox's lazily loaded dialog belongs to the inbox.
+  const dialog = await buildApp({ "modules/inbox-dialog.js": 'export const text = "Reply";' });
+  expect(dialog.client).not.toBe(before.client);
+  expect(dialog.modules?.inbox).not.toBe(before.modules?.inbox);
+  expect(dialog.modules?.kb).toBe(before.modules?.kb);
+
+  // Code the two modules share is part of both.
+  const shared = await buildApp({
+    "modules/format.js": "export const format = (text) => `<${text}>`;",
+  });
+  expect(shared.modules?.inbox).not.toBe(before.modules?.inbox);
+  expect(shared.modules?.kb).not.toBe(before.modules?.kb);
+
+  // The shell's own code, which every page has already, changes the client only.
+  const shell = await buildApp({ "shared.js": "export const greet = (who) => `hi ${who}`;" });
+  expect(shell.client).not.toBe(before.client);
+  expect(shell.modules).toEqual(before.modules);
+}, 60_000);
+
+test("the build's id in the browser code, as an app's release name, changes no fingerprint", async () => {
+  // As an app writes its commit, whole and short, into the code that tags its error reports.
+  const releasing = (commit: string) => ({
+    "modules/kb.js": [
+      'import { format } from "./format.js";',
+      `const release = "v1+${commit}", version = "${commit.slice(0, 7)}";`,
+      "export const render = () => format(`Help center ${release} ${version}`);",
+    ].join("\n"),
+  });
+  const first = await buildApp(releasing("4f1c9e2aa07"), [], "4f1c9e2aa07");
+  const second = await buildApp(releasing("b83d05f6c1e"), [], "b83d05f6c1e");
+  expect(second.id).toBe("b83d05f6c1e");
+  expect({ ...second, id: first.id }).toEqual(first);
+}, 60_000);

@@ -11,6 +11,9 @@
  *   (`followNewBuild`), after the app's unsaved-work guards have run; a notice can offer the
  *   reload (`useNewBuildNotice` in `./react`); and an error screen that caught a missing chunk
  *   reloads onto the new build instead of showing (`recoverFromChunkError`).
+ * - `/build.json` also carries the browser code's fingerprint and each named module's. A deploy
+ *   that leaves the page's browser code as it was is not new to the tab, and a notice for a
+ *   module waits until a deploy changes that module (`isModuleChanged`).
  *
  * A failed hover or idle preload only triggers the check: the page reloads when it needs the
  * code, never under someone reading or typing. A chunk that fails while the page's build is
@@ -25,8 +28,8 @@ declare const __DEPLOY_WATCH_BUILD_FILE__: string | undefined;
 /** The `<meta>` the server writes the page's build id into. */
 export const BUILD_META_NAME = "deploy-watch-build";
 /**
- * The live build's id, from the static assets: `{ "id": "<commit>" }`. This is where it is with
- * Vite's default `base`; the Vite plugin tells the browser where it is under another one.
+ * The live build's file, from the static assets (`BuildFile`). This is where it is with Vite's
+ * default `base`; the Vite plugin tells the browser where it is under another one.
  */
 export const BUILD_FILE = "/build.json";
 /** The fewest milliseconds between two checks a tab's own activity starts; a failed chunk checks at once. */
@@ -40,11 +43,21 @@ export const CHUNK_RETRY_KEY = "deploy-watch:chunk-retry-for";
 
 type SessionStore = Pick<Storage, "getItem" | "setItem">;
 
+/** What `/build.json` says about a build; the Vite plugin writes it. */
+export type BuildFile = {
+  /** The build's id: the commit it was built from. */
+  id: string;
+  /** Its browser code's fingerprint: the same in every build whose browser code is the same. */
+  client?: string;
+  /** Each named module's fingerprint: the code it adds to the page that loads it. */
+  modules?: Readonly<Record<string, string>>;
+};
+
 export type DeployWatchDeps = {
   /** The build this page runs. */
   current: string;
-  /** The live build's id; null when the answer is not one. */
-  fetchLive: () => Promise<string | null>;
+  /** The live build's file; null when the answer is not one. */
+  fetchLive: () => Promise<BuildFile | null>;
   now: () => number;
   /** The tab's session storage; null where the browser refuses it. */
   storage: SessionStore | null;
@@ -76,28 +89,54 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
   const retriedFor = readStorage(storage, CHUNK_RETRY_KEY);
   // The page has just loaded the build it runs, so the first check waits like any other.
   let lastCheck = now();
-  let live: string | null = null;
-  // What the last check read: the live build's id, or null when `/build.json` did not answer.
-  let answered: string | null = null;
+  let asked = false;
+  // The page's own build, as `/build.json` described it while it was live.
+  let own: BuildFile | null = null;
+  // The newer build's file once one is live, the latest such answer.
+  let live: BuildFile | null = null;
+  // Whether the last check read a build with the page's own browser code; false when
+  // `/build.json` did not answer.
+  let answeredOwnCode = false;
   let pending: Promise<boolean> | null = null;
   let reloading = false;
   const listeners = new Set<() => void>();
 
-  /** Whether a newer build is live. `force` skips the spacing, for a chunk that failed. */
+  /**
+   * Whether `build` runs the page's browser code: the page's own build, or a later one whose
+   * browser code is the same (a deploy that changed only the server). Unknown until the tab has
+   * read its own build's file, and then the build counts as new.
+   */
+  function sameCode(build: BuildFile): boolean {
+    return build.id === current || (!!own?.client && build.client === own.client);
+  }
+
+  /**
+   * Whether a newer build is live. `force` skips the spacing, for a chunk that failed. Once a
+   * newer build is live, it stays new for the tab, and later checks keep reading `/build.json`
+   * for a deploy after it, which may change another module.
+   */
   function check({ force = false }: { force?: boolean } = {}): Promise<boolean> {
-    if (live) return Promise.resolve(true);
+    // A chunk that failed on a page a newer build replaced needs no answer: the page reloads.
+    if (live && force) return Promise.resolve(true);
     if (pending) return pending;
-    if (!force && now() - lastCheck < CHECK_SPACING_MS) return Promise.resolve(false);
+    if (!force && now() - lastCheck < CHECK_SPACING_MS) return Promise.resolve(live !== null);
     lastCheck = now();
+    asked = true;
     pending = fetchLive()
       .catch(() => null)
-      .then((id) => {
+      .then((answer) => {
         pending = null;
-        answered = id;
-        if (id && id !== current && id !== reloadedFor) {
-          live = id;
-          for (const listener of listeners) listener();
+        let changed = false;
+        if (answer?.id === current && !own) {
+          own = answer;
+          changed = true;
         }
+        answeredOwnCode = answer !== null && sameCode(answer);
+        if (answer && !answeredOwnCode && answer.id !== reloadedFor && answer.id !== live?.id) {
+          live = answer;
+          changed = true;
+        }
+        if (changed) for (const listener of listeners) listener();
         return live !== null;
       });
     return pending;
@@ -119,7 +158,7 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
     if (reloading || !live) return;
     reloading = true;
     // Without storage the reload still happens; only the loop guard is lost.
-    remember(RELOADED_FOR_KEY, live);
+    remember(RELOADED_FOR_KEY, live.id);
     load(href);
   }
 
@@ -127,6 +166,23 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
     check,
     reload,
     isNew: () => live !== null,
+    /**
+     * Whether a newer build is live and changes `module`'s code. True as well when the tab cannot
+     * tell: it has not read its own build's file, or either file has no module fingerprints. A
+     * module neither build names has no code of its own, and never changes.
+     */
+    changes(module: string): boolean {
+      if (!live) return false;
+      if (!own?.modules || !live.modules) return true;
+      return own.modules[module] !== live.modules[module];
+    },
+    /**
+     * Reads `/build.json` once, unless a check already has. Soon after the page loads it still
+     * names the page's own build, so a later deploy can be compared with it module by module.
+     */
+    learnOwnBuild() {
+      if (!asked) void check({ force: true });
+    },
     isReloading: () => reloading,
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -145,12 +201,12 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
         return true;
       }
       if (reloading) return true;
-      // `/build.json` names the page's own build, so the chunk is on the server and the browser
-      // failed to fetch it. Chromium keeps a failed module import for the life of the document
-      // (whatwg/html#6768), so only a new page fetches it again. The tab reloads once for its
-      // build; a second failure, an unanswered check (offline) or no storage to remember the
+      // `/build.json` names the page's own browser code, so the chunk is on the server and the
+      // browser failed to fetch it. Chromium keeps a failed module import for the life of the
+      // document (whatwg/html#6768), so only a new page fetches it again. The tab reloads once for
+      // its build; a second failure, an unanswered check (offline) or no storage to remember the
       // first reload in is the screen's.
-      if (answered !== current || retriedFor === current || !remember(CHUNK_RETRY_KEY, current))
+      if (!answeredOwnCode || retriedFor === current || !remember(CHUNK_RETRY_KEY, current))
         return false;
       reloading = true;
       load();
@@ -181,10 +237,20 @@ function readStorage(storage: SessionStore | null, key: string): string | null {
   }
 }
 
-/** The id in a `/build.json` body, or null for anything else. */
-export function parseBuildFile(body: unknown): string | null {
-  if (!body || typeof body !== "object" || !("id" in body)) return null;
-  return typeof body.id === "string" && body.id ? body.id : null;
+/** The build a `/build.json` body describes, or null for anything else. */
+export function parseBuildFile(body: unknown): BuildFile | null {
+  if (!body || typeof body !== "object") return null;
+  const { id, client, modules } = body as Record<string, unknown>;
+  if (typeof id !== "string" || !id) return null;
+  const build: BuildFile = { id };
+  if (typeof client === "string" && client) build.client = client;
+  if (modules && typeof modules === "object" && !Array.isArray(modules))
+    build.modules = Object.fromEntries(
+      Object.entries(modules).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+  return build;
 }
 
 // The errors Vite's preload helper announced with `vite:preloadError`: the same object reaches the
@@ -217,7 +283,7 @@ export function pageBuildId(): string {
   return document.querySelector<HTMLMetaElement>(`meta[name="${BUILD_META_NAME}"]`)?.content ?? "";
 }
 
-async function fetchLiveBuild(buildFile: string): Promise<string | null> {
+async function fetchLiveBuild(buildFile: string): Promise<BuildFile | null> {
   const response = await fetch(buildFile, {
     cache: "no-store",
     credentials: "omit",
@@ -290,12 +356,33 @@ export function isWatching(): boolean {
   return watch !== null;
 }
 
-/** Whether a newer build than this page's is live. */
+/** Whether a newer build than this page's is live, with other browser code. */
 export function isNewBuildLive(): boolean {
   return watch?.isNew() ?? false;
 }
 
-/** Calls `listener` once a newer build is live. */
+/**
+ * Whether a newer build is live and changes `module`, as the Vite plugin's `modules` names it:
+ * the code the module adds to the page that loads it. True as well while the tab cannot tell,
+ * for instance before it has read its own build's file (`learnPageBuild`).
+ */
+export function isModuleChanged(module: string): boolean {
+  return watch?.changes(module) ?? false;
+}
+
+/**
+ * Reads `/build.json` once soon after the page loads, while it most likely still names the
+ * page's own build, so `isModuleChanged` can compare a later deploy with it. Nothing happens once
+ * a check has read it. `useNewBuildNotice({ module })` calls it.
+ */
+export function learnPageBuild(): void {
+  watch?.learnOwnBuild();
+}
+
+/**
+ * Calls `listener` once a newer build is live, and again when the tab learns more: a later
+ * deploy, or its own build's file, either of which can change `isModuleChanged`.
+ */
 export function subscribeToNewBuild(listener: () => void): () => void {
   return watch?.subscribe(listener) ?? (() => {});
 }
