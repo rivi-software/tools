@@ -9,7 +9,7 @@ This package notices the deploy in the browser and moves the tab on:
 - a notice can offer the reload, only when the deploy changed the module on screen if you name your modules
 - an error screen that caught a missing chunk reloads instead of showing
 
-A deploy that leaves the browser code as it was (a server-only commit) does none of these.
+A deploy that leaves every browser file as it was (a server-only commit, in an app whose browser code does not carry the commit) does none of these.
 
 ```bash
 npm install @rivi-software/deploy-watch
@@ -91,9 +91,10 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
   - A relative `base` (`./`) or a `base` on another host names no fixed path, so name it yourself: `startDeployWatch({ buildFile: "/where/build.json" })`.
   - The plugin also bundles this package into server builds (`resolve.noExternal`): a define reaches only bundled code, and Vite leaves dependencies external there by default.
   - The dev server and a local build have no id, and nothing runs.
-- **The fingerprints.** Rollup renames a chunk when any chunk it imports, even lazily, was renamed, so one changed file renames most of a bundle. A fingerprint reads each file's content instead, with every name of a file in the bundle taken out, and with the build's id too (the whole id, or its first seven characters alone), since an app may write its release into its code for error reports.
-  - `client` covers every file of the browser build but source maps and Vite's manifests in `.vite/`. Two builds with the same browser code have the same `client`.
+- **The fingerprints.**
+  - `client` covers the name and the exact content of every file of the browser build but source maps and Vite's manifests in `.vite/`. Two builds have the same `client` only when they serve the same files, so a tab on one can load every chunk it needs from the other. An app that writes its commit into its browser code gets a new `client` with every commit.
   - With `modules`, each named module's fingerprint covers what its lazily loaded files bring beyond the page that loads them: the files they import, statically or lazily, less the entry's own files and what the importers' chunks import statically. Code every page already has, such as the shell's own components, is in no module.
+  - A module's fingerprint decides only whether the notice shows, so it reads what the code does. Rollup renames a chunk when any chunk it imports, even lazily, was renamed, so one changed file renames most of a bundle. The module fingerprint reads each file's content with every name of a file in the bundle taken out, and with the build's id too (the whole id, or its first seven characters alone), since an app may write its release into its code for error reports. A `buildId` shorter than seven characters, such as a CI build number, is not taken out.
 - **The page's id.** `BuildMeta` renders `<meta name="deploy-watch-build">` in the document's head on the server. In the browser it reads the tag back, so hydration matches.
 - **The check.** `startDeployWatch()` reads `build.json` (`no-store`, without cookies, giving up after 10 s):
   - when the tab comes back into view, gets focus or comes back online, at most once a minute

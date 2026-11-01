@@ -96,12 +96,13 @@ export function deployWatch({
 
 type Fingerprints = { client: string; modules?: Record<string, string> };
 
-// A run of the characters an output file's name is made of. Replacing every run that is a file of
-// the bundle leaves a file's own content: a chunk whose code did not change keeps its fingerprint,
-// although Rollup renames it when a chunk it imports, even lazily, was renamed. A run with the
-// build's whole id in it, or that is its short form (a commit's first seven characters), goes too:
-// an app may write its release into its browser code for error reports, which changes with every
-// commit.
+// A run of the characters an output file's name is made of. For a module's fingerprint, replacing
+// every run that is a file of the bundle leaves a file's own content: a chunk whose code did not
+// change keeps its fingerprint, although Rollup renames it when a chunk it imports, even lazily,
+// was renamed. A run with the build's whole id in it, or that is its short form (a commit's first
+// seven characters), goes too: an app may write its release into its browser code for error
+// reports, which changes with every commit. An id shorter than that (a CI build number) stays, so
+// that runs which merely contain it do not hide a change.
 const NAME_RUN = /[\w$.~@+-]+/g;
 const SHORT_ID = 7;
 
@@ -122,10 +123,15 @@ function combine(fingerprints: Iterable<string>): string {
 }
 
 /**
- * The browser code's fingerprint (`client`), from every file but source maps and Vite's own
- * manifests in `.vite/` (which describe the build and are never loaded), and each named
- * module's: the files its lazily loaded entries bring beyond what the page that loads them (the
- * importer's chunk and everything it imports statically) already has.
+ * The browser code's fingerprint (`client`), from the name and the exact content of every file
+ * but source maps and Vite's own manifests in `.vite/` (which describe the build and are never
+ * loaded). It changes whenever a file the tab could load is renamed or changed, since a tab on the
+ * old build may need files the new one no longer serves.
+ *
+ * Each named module's fingerprint only decides whether a notice shows, so it reads what the code
+ * does: the files its lazily loaded entries bring beyond what the page that loads them (the
+ * importer's chunk and everything it imports statically) already has, without file names or the
+ * build's id.
  */
 function fingerprintBundle(
   bundle: Rollup.OutputBundle,
@@ -147,19 +153,24 @@ function fingerprintBundle(
       !output.fileName.startsWith(".vite/") &&
       output.fileName !== "build.json",
   );
+  const client = combine(
+    outputs.map(
+      (output) =>
+        `${output.fileName}\0${digest(output.type === "chunk" ? output.code : output.source)}`,
+    ),
+  );
+  if (!modules) return { client };
+
   const names = new Set(Object.keys(bundle).map((fileName) => fileName.split("/").pop() ?? ""));
-  const short = id.slice(0, SHORT_ID);
+  const short = id.length >= SHORT_ID ? id.slice(0, SHORT_ID) : null;
+  const isId = (run: string) => short !== null && (run === short || run.includes(id));
   const normalize = (text: string) =>
-    text.replace(NAME_RUN, (run) =>
-      names.has(run) || run === short || run.includes(id) ? "\0" : run,
-    );
+    text.replace(NAME_RUN, (run) => (names.has(run) || isId(run) ? "\0" : run));
   const own = new Map<string, string>();
   for (const output of outputs) {
     const content = output.type === "chunk" ? output.code : output.source;
     own.set(output.fileName, digest(typeof content === "string" ? normalize(content) : content));
   }
-  const client = combine(own.values());
-  if (!modules) return { client };
 
   const chunks = new Map<string, Rollup.OutputChunk>();
   const chunkOf = new Map<string, string>();

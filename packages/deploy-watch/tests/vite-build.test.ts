@@ -189,7 +189,7 @@ test("each named module's fingerprint changes only with the code it adds to the 
   expect(shell.modules).toEqual(before.modules);
 }, 60_000);
 
-test("the build's id in the browser code, as an app's release name, changes no fingerprint", async () => {
+test("the build's id in the browser code changes the client, but no module's fingerprint", async () => {
   // As an app writes its commit, whole and short, into the code that tags its error reports.
   const releasing = (commit: string) => ({
     "modules/kb.js": [
@@ -201,5 +201,22 @@ test("the build's id in the browser code, as an app's release name, changes no f
   const first = await buildApp(releasing("4f1c9e2aa07"), [], "4f1c9e2aa07");
   const second = await buildApp(releasing("b83d05f6c1e"), [], "b83d05f6c1e");
   expect(second.id).toBe("b83d05f6c1e");
-  expect({ ...second, id: first.id }).toEqual(first);
+  // The chunk with the commit, and every chunk that imports it, has another name, and a tab on the
+  // first build may need files the second no longer serves: its browser code is not the same.
+  expect(second.client).not.toBe(first.client);
+  // What the code does is the same, so no notice is due.
+  expect(second.modules).toEqual(first.modules);
+}, 60_000);
+
+test("a short build id, such as a CI build number, hides no change", async () => {
+  const numbered = (count: string) => ({
+    "modules/kb.js": [
+      'import { format } from "./format.js";',
+      `export const render = () => format("Help center: ${count} articles");`,
+    ].join("\n"),
+  });
+  const first = await buildApp(numbered("142"), [], "42");
+  const second = await buildApp(numbered("242"), [], "42");
+  expect(second.modules?.kb).not.toBe(first.modules?.kb);
+  expect(second.modules?.inbox).toBe(first.modules?.inbox);
 }, 60_000);
