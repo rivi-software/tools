@@ -1,8 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    // Node runs the scripts as they are, stripping their types.
-    "erasableSyntaxOnly": true
+    // Node runs the scripts as they are, stripping their types, so one imports another by its
+    // .ts name.
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true
   },
   "include": ["scripts"]
 }

@@ -1,6 +1,6 @@
 # Security
 
-This policy covers the code in this repository: the `@rivi-software/*` packages on npm, the [rivi-bot](rivi-bot) GitHub Action and its reusable workflow, and the workflows that test, review and release them.
+This policy covers the code in this repository: the `@rivi-software/*` packages on npm and GitHub Packages, the [rivi-bot](rivi-bot) GitHub Action and its reusable workflow, and the workflows that test, review and release them.
 
 ## Reporting a vulnerability
 
@@ -46,7 +46,7 @@ In scope, for example:
 - A flaw in a package that an attacker can exploit in an app using it as its README describes: an injection, a leaked secret or token, a check that can be bypassed.
 - A way to run code, read a secret or write to this repository through its workflows, for example from a pull request from a fork.
 - A way to make rivi-bot do more than [its README](rivi-bot/README.md#safety) allows: run a command, edit a file, reveal a secret, or approve a pull request when `approve` is `false`.
-- A way to publish a package to npm, or to move or delete a release tag, without a maintainer.
+- A way to publish a package to npm or GitHub Packages, or to move or delete a release tag, without a maintainer.
 
 Out of scope:
 
@@ -62,7 +62,7 @@ Test against your own copy: a fork, a local checkout, or an app or repository yo
 
 - Do not open pull requests or issues here to try an attack on the workflows. Reproduce it in a fork, with your own secrets.
 - Do not access, change or delete data that is not yours, and stop once you have shown the problem.
-- Do not publish to, or tamper with, the `@rivi-software` packages on npm.
+- Do not publish to, or tamper with, the `@rivi-software` packages on npm or GitHub Packages.
 - No denial of service, spam or social engineering of maintainers.
 
 ## Safe harbor
@@ -78,3 +78,5 @@ A package's first version is the exception: a maintainer publishes it by hand, o
 Release tags (`@rivi-software/<name>@<version>`, `rivi-bot-v*`) are never moved or deleted. Pin rivi-bot to a commit SHA or to one of those tags.
 
 A version without provenance that is not its package's first, or with provenance from another repository or workflow, did not come from us: report it.
+
+The release workflow also copies each release to GitHub Packages, which keeps no npm provenance. A copy is npm's own tarball, published only once it matches the integrity npm lists for that version, so the two registries list the same `integrity`. Compare a copy's with npm's (`npm view @rivi-software/<name>@<version> dist.integrity`, once against each registry), and check provenance on npm. A copy whose integrity differs from npm's did not come from us: report it.
