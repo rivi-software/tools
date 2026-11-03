@@ -6,4 +6,4 @@ A change to a published package comes with a changeset, which names the packages
 pnpm changeset
 ```
 
-The release workflow keeps a "Version packages" pull request open while changesets wait on `main`; merging it publishes the new versions to npm. See [CONTRIBUTING.md](../CONTRIBUTING.md#changes-and-releases).
+The release workflow keeps a "Version packages" pull request open while changesets wait on `main`; merging it publishes the new versions to npm, and then copies them to GitHub Packages. See [CONTRIBUTING.md](../CONTRIBUTING.md#changes-and-releases).

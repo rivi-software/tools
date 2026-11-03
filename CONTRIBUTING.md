@@ -158,6 +158,8 @@ A change to a published package comes with a changeset ([Making the change](#mak
 
 On `main`, the release workflow ([`.github/workflows/release.yml`](.github/workflows/release.yml)) keeps a "Version packages" pull request open while changesets wait. Merging it publishes every version npm does not have yet, through [trusted publishing](https://docs.npmjs.com/trusted-publishers) with provenance, and tags each release.
 
+The workflow's next job copies to GitHub Packages every release that npm has and GitHub Packages lacks, with [`scripts/mirror-github-packages.ts`](scripts/mirror-github-packages.ts) and the job's `GITHUB_TOKEN`. It publishes npm's own tarball once it matches the integrity npm lists, so both registries serve the same bytes. It copies releases oldest first, and a run catches up on whatever an earlier one missed, so it needs no backfill by hand: re-run the job to retry. GitHub Packages has no `npm dist-tag`, so each copy is published with a tag that ends up where npm's points; `node scripts/mirror-github-packages.ts --dry-run` lists the copies and their tags. GitHub Packages links each package to this repository through the `repository` field, and takes its access from the repository.
+
 #### The first release of a new package
 
 npm adds a trusted publisher only to a package that already exists, so a maintainer publishes a new package's first version by hand, once:
@@ -172,7 +174,8 @@ npm adds a trusted publisher only to a package that already exists, so a maintai
    ```
 
 3. On npmjs.com, under the package's **Settings → Trusted publishing**, add GitHub Actions with organization `rivi-software`, repository `tools` and workflow `release.yml`. Under **Publishing access**, require two-factor authentication and disallow tokens, so only the workflow publishes from then on.
-4. Re-run the failed release workflow. It finds the version on npm and passes.
+4. Re-run the failed release workflow. It finds the version on npm and passes, and its next job copies the version to GitHub Packages.
+5. Make the package public on GitHub Packages, which creates every new package private whatever the repository's visibility: in the organization's **Packages**, open the package, then **Package settings → Danger Zone → Change visibility → Public**. There is no API for it, and a public package cannot be made private again.
 
 ### Rulesets
 

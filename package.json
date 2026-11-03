@@ -1,7 +1,7 @@
 {
   "name": "rivi-tools",
   "private": true,
-  "description": "Tools RIVI Software builds its apps with, published to npm under @rivi-software",
+  "description": "Tools RIVI Software builds its apps with, published to npm and GitHub Packages under @rivi-software",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@12.15.0",
@@ -11,7 +11,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "test": "pnpm -r run test",
+    "test": "pnpm -r run test && vitest run --dir scripts",
     "check:manifests": "node scripts/check-publish-manifests.ts",
     "check:packages": "node scripts/check-packed-imports.ts",
     "verify": "pnpm run check:manifests && pnpm run format:check && pnpm run lint && pnpm run check && pnpm run test && pnpm run build && pnpm run check:packages",

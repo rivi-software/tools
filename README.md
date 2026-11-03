@@ -1,6 +1,6 @@
 # RIVI tools
 
-Small packages RIVI Software builds its own apps with, for Cloudflare Workers, Vite, React and TanStack Start, published to npm under [`@rivi-software`](https://www.npmjs.com/org/rivi-software). Each started as code in one of our apps and moved here once it was useful beyond it. Each lives in [`packages/`](packages) with its own README.
+Small packages RIVI Software builds its own apps with, for Cloudflare Workers, Vite, React and TanStack Start, published to npm under [`@rivi-software`](https://www.npmjs.com/org/rivi-software) and copied to [GitHub Packages](https://github.com/orgs/rivi-software/packages?repo_name=tools). Each started as code in one of our apps and moved here once it was useful beyond it. Each lives in [`packages/`](packages) with its own README.
 
 ## Packages
 
@@ -14,6 +14,17 @@ Small packages RIVI Software builds its own apps with, for Cloudflare Workers, V
 | [`workers-mail`](packages/workers-mail#readme) ([npm](https://www.npmjs.com/package/@rivi-software/workers-mail)) | Mail from Workers through Amazon SES, and through Cloudflare Email Service's binding until SES is set up or when it refuses a message | Workers |
 
 Each is published as `@rivi-software/<name>`. They are ESM only and ship JavaScript with type declarations. Where they run in Node, they support Node 22 and later.
+
+### From GitHub Packages
+
+Every release is on GitHub Packages too, as the same tarball npm has. GitHub Packages asks for a token even to install a public package. To install the `@rivi-software` packages from there, add this to the project's `.npmrc`:
+
+```ini
+@rivi-software:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+Then set `GITHUB_TOKEN` to a classic personal access token with `read:packages` or, in GitHub Actions, to the job's `GITHUB_TOKEN` with `packages: read`. Every other dependency still comes from npm.
 
 ## rivi-bot
 
