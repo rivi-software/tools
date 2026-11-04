@@ -5,6 +5,12 @@ export {
   requireEnvMinLength,
   type Env,
 } from "./deploy-env.js";
+export {
+  assertDeployedBindings,
+  type BindingsConfig,
+  type DeployedBindingsOptions,
+} from "./deployed-bindings.js";
+export { secretsFromEnv, withSecretsFile, type SecretsFileOptions } from "./secrets-file.js";
 export { checkDeploymentHealth, type HealthCheckOptions } from "./deployment-health.js";
 export {
   binPath,
