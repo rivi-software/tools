@@ -15,11 +15,13 @@ export type { MigrationsSource } from "./files.js";
 /** The journal's file name in the migrations directory, unless `journal` names another file. */
 export const JOURNAL_FILE = "JOURNAL.json";
 
+/** Where the migrations are, as the D1 binding in the Wrangler config says, and the journal. */
 export type JournalOptions = MigrationsSource & {
   /** The journal, relative to `cwd`. Default `JOURNAL.json` in the migrations directory. */
   journal?: string;
 };
 
+/** One recorded migration: its name, and the hash of its text when it was recorded. */
 export type JournalEntry = {
   /** The migration's name, as its migrations table records it. */
   name: string;
@@ -42,6 +44,7 @@ export type JournalProblem = {
   kind: "edited" | "deleted" | "unrecorded";
 };
 
+/** What {@link checkJournal} found. It writes nothing. */
 export type JournalCheck = {
   /** The journal's absolute path. */
   journal: string;
@@ -49,6 +52,7 @@ export type JournalCheck = {
   problems: JournalProblem[];
 };
 
+/** What {@link updateJournal} recorded, or the problems that kept it from writing anything. */
 export type JournalUpdate = {
   /** The journal's absolute path. */
   journal: string;
