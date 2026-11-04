@@ -289,4 +289,19 @@ Pin the actions or the reusable workflow to a commit SHA, or to a `rivi-bot-v*` 
 
 ## License
 
-[MIT](../LICENSE)
+Licensed under the [MIT License](../LICENSE). Copyright © 2026 RIVI Software.
+
+<br>
+
+<p align="center">
+  <a href="https://rivi.software">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/rivi-mark-on-dark.svg">
+      <img src="../assets/rivi-mark.svg" alt="RIVI Software" width="36" height="36">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <sub>rivi-bot is part of <a href="../README.md">RIVI tools</a>, made by <a href="https://rivi.software">RIVI Software</a>.</sub>
+</p>

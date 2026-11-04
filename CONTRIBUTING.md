@@ -68,7 +68,7 @@ You may use AI tools to write an issue or a pull request, and you are its author
 
 A new package starts with an issue, like any change bigger than a fix.
 
-Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app. Add it to the table of packages in the root README.
+Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app. Start the README with the badge row the other packages have, under its title, and end it with their License section and RIVI Software sign-off, with the package's name in the badges' addresses. Add the package to the table of packages in the root README.
 
 ```text
 packages/<name>/

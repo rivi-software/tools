@@ -1,11 +1,15 @@
 # @rivi-software/cloudflare-deploy
 
+[![npm version](https://img.shields.io/npm/v/@rivi-software/cloudflare-deploy?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/cloudflare-deploy) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+
 Deploy helpers for apps on Cloudflare Workers:
 - guards for a deploy script's environment
 - a health check for a fresh deployment
 - child-process helpers
 - a small client for the Cloudflare REST API, covering the resources an app creates at runtime (D1, KV, R2, Workers for Platforms)
 - skew protection, which keeps earlier builds' client files served after a deploy, so a tab still running the previous build can load its lazy chunks
+
+## Install
 
 ```bash
 npm install @rivi-software/cloudflare-deploy
@@ -77,7 +81,6 @@ It uses only `fetch`, `FormData` and `Blob`.
 
 - **Other endpoints.** `call(method, path, init)` sends a request to `path` under `/accounts/<accountId>` and answers the envelope's `result`. `init` takes a `json` or `form` body, `query`, `headers`, and `idempotent` for a POST that is safe to send twice. `maybe` answers `undefined` for a 404 instead of throwing.
 - **Timeouts.** Each request gives up after `timeoutMs` (30 s by default).
-
 - **Errors.** A failure throws `CloudflareApiError` with the method, the path, the status and Cloudflare's error codes (`error.has(10008)`), never the token. A lookup returns `undefined` for a missing resource, so missing and failed stay apart.
 - **Retries.** With `retry: { attempts }`, the client sends a request again while Cloudflare answers 429 or 5xx or the request fails on the way. It pauses 1 s, then twice as long each time. This applies only to requests that are safe to repeat: reads, replacing writes, deletes and KV bulk deletes. A create is sent once. Retries are off by default, so Worker code keeps its own policy.
 
@@ -197,4 +200,19 @@ None of them calls Cloudflare. In this directory, run `pnpm run test`, `pnpm run
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the [MIT License](LICENSE). Copyright © 2026 RIVI Software.
+
+<br>
+
+<p align="center">
+  <a href="https://rivi.software">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark-on-dark.svg">
+      <img src="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark.svg" alt="RIVI Software" width="36" height="36">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <sub>Part of <a href="https://github.com/rivi-software/tools#readme">RIVI tools</a>, the packages <a href="https://rivi.software">RIVI Software</a> builds its own apps with.</sub>
+</p>

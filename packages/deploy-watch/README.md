@@ -1,5 +1,7 @@
 # @rivi-software/deploy-watch
 
+[![npm version](https://img.shields.io/npm/v/@rivi-software/deploy-watch?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/deploy-watch) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+
 Moves a browser tab that was open across a deploy onto the new build, at a moment that loses nothing.
 
 A deploy serves only its own hashed chunks. A tab still running the previous build keeps calling the server with old code. It also fails on the next chunk it loads lazily, unless the old files are still served; on Cloudflare Workers, [`@rivi-software/cloudflare-deploy`](https://github.com/rivi-software/tools/tree/main/packages/cloudflare-deploy#skew-protection) keeps them for seven days.
@@ -10,6 +12,8 @@ This package notices the deploy in the browser and moves the tab on:
 - an error screen that caught a missing chunk reloads instead of showing
 
 A deploy that leaves every browser file as it was (a server-only commit, in an app whose browser code does not carry the commit) does none of these.
+
+## Install
 
 ```bash
 npm install @rivi-software/deploy-watch
@@ -210,4 +214,19 @@ The tests in `tests/` cover the watch over injected dependencies: the spacing be
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the [MIT License](LICENSE). Copyright © 2026 RIVI Software.
+
+<br>
+
+<p align="center">
+  <a href="https://rivi.software">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark-on-dark.svg">
+      <img src="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark.svg" alt="RIVI Software" width="36" height="36">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <sub>Part of <a href="https://github.com/rivi-software/tools#readme">RIVI tools</a>, the packages <a href="https://rivi.software">RIVI Software</a> builds its own apps with.</sub>
+</p>
