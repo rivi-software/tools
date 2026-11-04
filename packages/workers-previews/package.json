@@ -1,0 +1,62 @@
+{
+  "name": "@rivi-software/workers-previews",
+  "version": "0.1.0",
+  "description": "Names Cloudflare Workers Previews after their branch, within a hostname label and without collisions, and cleans them up: deletes a branch's Previews once its Workers Builds are idle, and sweeps away the Previews whose branch is gone or whose pull requests are closed",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "cf-previews": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rivi-software/cloudflare-deploy": "workspace:^"
+  },
+  "peerDependencies": {
+    "wrangler": "^4.135.0"
+  },
+  "peerDependenciesMeta": {
+    "wrangler": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "wrangler": "4.156.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "wrangler",
+    "previews",
+    "preview-deployments",
+    "workers-builds",
+    "github-actions",
+    "cleanup"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/workers-previews"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/workers-previews#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}

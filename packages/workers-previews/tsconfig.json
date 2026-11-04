@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // `check` and `test` run before any build, so they read cloudflare-deploy's sources. The build
+    // (tsconfig.build.json) resolves the package's built files, as a consumer does.
+    "paths": {
+      "@rivi-software/cloudflare-deploy": ["../cloudflare-deploy/src/index.ts"],
+      "@rivi-software/cloudflare-deploy/*": ["../cloudflare-deploy/src/*.ts"]
+    }
+  },
+  "include": ["src", "tests", "vitest.config.ts"]
+}
