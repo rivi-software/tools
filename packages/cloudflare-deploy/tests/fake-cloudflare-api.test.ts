@@ -309,6 +309,26 @@ test("failNext fails a call, or carries it out and loses the answer", async () =
   expect(await api.r2.get("x")).toBeUndefined();
 });
 
+test("failNext fails every matching call when the pattern is global or sticky", async () => {
+  const fake = createFakeCloudflareApi();
+  const api = cloudflareApi(fake);
+  const { id } = await api.kv.create({ title: "cache" });
+  const put = () => api.kv.putMany(id, [{ key: "k", value: "v" }]);
+  const global = /\/bulk$/g;
+  const sticky = /^\/storage\/kv\/namespaces\/\w+\/bulk$/y;
+  for (const pattern of [global, sticky]) {
+    fake.failNext("PUT", pattern, { times: 2 });
+    expect((await failure(put())).status).toBe(500);
+    expect((await failure(put())).status).toBe(500);
+    await put();
+    expect(pattern.lastIndex).toBe(0);
+  }
+
+  // A sticky pattern still matches only from the start of the path.
+  fake.failNext("PUT", /\/bulk$/y);
+  await put();
+});
+
 test("the client's retry rides out transient failures the fake injects", async () => {
   const fake = createFakeCloudflareApi();
   const api = cloudflareApi({ ...fake, retry: { attempts: 3, sleep: async () => {} } });

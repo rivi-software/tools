@@ -786,9 +786,10 @@ export function createFakeCloudflareApi(options: FakeCloudflareApiOptions = {}) 
     const path = `/${rest.join("/")}`;
     calls.push(`${request.method} ${path}`);
     const segments = rest.map((segment) => decodeURIComponent(segment));
-    const failure = failures.find(
-      (item) => item.times > 0 && item.method === request.method && item.pattern.test(path),
-    );
+    const failure = failures.find((item) => {
+      item.pattern.lastIndex = 0;
+      return item.times > 0 && item.method === request.method && item.pattern.test(path);
+    });
     if (!failure) return answer(request, url, segments);
     if (failure.skip > 0) {
       failure.skip -= 1;
@@ -811,11 +812,13 @@ export function createFakeCloudflareApi(options: FakeCloudflareApiOptions = {}) 
     /**
      * Fails the next call (or `times` calls) whose method matches and whose path under
      * `/accounts/<id>` matches `pattern`, such as `failNext("POST", /^\/d1\/database$/)`.
+     * Each call is tested as a fresh copy of the pattern would test it, so a `g` or `y` flag
+     * carries no `lastIndex` from one call to the next.
      */
     failNext(method: string, pattern: RegExp, failure: FakeFailure = {}) {
       failures.push({
         method: method.toUpperCase(),
-        pattern,
+        pattern: new RegExp(pattern),
         status: failure.status ?? 500,
         code: failure.code ?? 10000,
         message: failure.message ?? "Injected failure",

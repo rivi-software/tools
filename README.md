@@ -36,7 +36,7 @@ Each package started as code in one of our apps and moved here once it was usefu
 
 | Package | What it does | Runs in |
 | --- | --- | --- |
-| [`cloudflare-deploy`](packages/cloudflare-deploy#readme) ([npm](https://www.npmjs.com/package/@rivi-software/cloudflare-deploy)) | Deploy helpers for Workers apps: environment guards, a post-deploy health check, a REST API client for D1, KV, R2 and Workers for Platforms, and skew protection that keeps earlier builds' client files served | Node, Workers |
+| [`cloudflare-deploy`](packages/cloudflare-deploy#readme) ([npm](https://www.npmjs.com/package/@rivi-software/cloudflare-deploy)) | Deploy helpers for Workers apps: environment guards, a post-deploy health check, a REST API client for D1, KV, R2 and Workers for Platforms, skew protection that keeps earlier builds' client files served, and test doubles: a fake of that API and a KV namespace that serves stale reads | Node, Workers |
 | [`deploy-watch`](packages/deploy-watch#readme) ([npm](https://www.npmjs.com/package/@rivi-software/deploy-watch)) | Moves a tab that was open across a deploy onto the new build, at a moment that loses nothing | Browser, React, Vite |
 | [`posthog-tanstack-start`](packages/posthog-tanstack-start#readme) ([npm](https://www.npmjs.com/package/@rivi-software/posthog-tanstack-start)) | PostHog error tracking for TanStack Start on Workers: the Worker's capture, Start middlewares, the browser SDK and the source map upload | Workers, browser, Vite |
 | [`semgrep-github-report`](packages/semgrep-github-report#readme) ([npm](https://www.npmjs.com/package/@rivi-software/semgrep-github-report)) | Semgrep findings as one pull request comment it keeps up to date, or in the job summary, with only the job's `GITHUB_TOKEN` | GitHub Actions |
