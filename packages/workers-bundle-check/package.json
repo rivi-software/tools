@@ -1,0 +1,56 @@
+{
+  "name": "@rivi-software/workers-bundle-check",
+  "version": "0.1.0",
+  "description": "Fails CI on what a Cloudflare Worker's build should not contain: a forbidden module or marker in the Worker, a source map its static assets would serve, or a value shaped like a secret",
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "wrangler",
+    "bundle",
+    "source-map",
+    "assetsignore",
+    "secrets",
+    "ci"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "workers-bundle-check": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ignore": "^5.3.2",
+    "minimatch": "^10.2.5"
+  },
+  "devDependencies": {
+    "vite": "8.3.5",
+    "wrangler": "4.156.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/workers-bundle-check"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/workers-bundle-check#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}
