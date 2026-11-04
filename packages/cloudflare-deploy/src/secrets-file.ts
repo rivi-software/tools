@@ -74,9 +74,13 @@ async function withPrivateFile<T>(
 }
 
 async function warnUnsetSecrets(set: string[], prefix: string, args: string[]) {
-  const { code, stdout, stderr } = await runCommand(wranglerCommand(["secret", "list", ...args]), {
+  const result = await runCommand(wranglerCommand(["secret", "list", ...args]), {
     capture: true,
+  }).catch((error: unknown) => {
+    console.warn(`Could not compare the Worker's secrets with ${prefix}_*: ${String(error)}`);
   });
+  if (!result) return;
+  const { code, stdout, stderr } = result;
   const names = code === 0 ? secretNames(stdout) : undefined;
   if (!names) {
     console.warn(
