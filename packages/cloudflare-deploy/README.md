@@ -3,7 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/@rivi-software/cloudflare-deploy?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/cloudflare-deploy) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
 
 Deploy helpers for apps on Cloudflare Workers:
-- guards for a deploy script's environment
+- guards for a deploy script's environment, and for placeholder binding ids in its config
+- a secrets file for `wrangler deploy --secrets-file`, written from the environment and deleted after the deploy
 - a health check for a fresh deployment
 - child-process helpers
 - a small client for the Cloudflare REST API, covering the resources an app creates at runtime (D1, KV, R2, Workers for Platforms)
@@ -38,6 +39,25 @@ In Worker code, import from the subpaths: the main entry also pulls in `node:chi
   - `assertProductionBuildBranch(env, branch = "main")` refuses a production deploy on GitHub Actions unless it is a push or a manual run on `branch`, and on Cloudflare Workers Builds unless `WORKERS_CI_BRANCH` is `branch`. Elsewhere, such as a deploy from your own machine, it passes.
 
   Each guard takes an optional `env` record (default `process.env`).
+- **Binding ids.** `await assertDeployedBindings(config, options?)` refuses a config whose D1 or KV bindings still carry a placeholder id, such as the `<PREVIEW_DATABASE_ID>` in Cloudflare's Preview examples, a `TODO` or an all-zero id. Wrangler finds such an id only at the upload, or at the first request that uses the binding, by which time a deploy script may have applied migrations. One error lists every such binding:
+
+  ```text
+  dist/server/wrangler.json has placeholder binding ids:
+    d1_databases[DB].database_id = "<PREVIEW_DATABASE_ID>"
+    kv_namespaces[CACHE].id = "TODO"
+  ```
+
+  - A D1 `database_id` must be a UUID, and a KV `id` 32 hexadecimal characters. Neither may be all zeros.
+  - A binding without an id passes, because Wrangler creates the resource on deploy.
+  - `config` is the path to a JSON or JSONC config, such as the `wrangler.json` the Cloudflare Vite plugin writes, or a config you have parsed. Parse a TOML config yourself.
+  - It checks the top level, which `wrangler deploy` deploys. `environment: "staging"` checks `env.staging` instead, and `previews: true` checks the `previews` block, which `wrangler preview` deploys. Wrangler does not inherit bindings into either, so each block's own lists are what deploys.
+- **Secrets file.** `withSecretsFile({ prefix }, run)` writes the secrets in the environment to a file for `wrangler deploy --secrets-file` or `wrangler secret bulk`, and runs `run` with its path.
+  - Each variable `<PREFIX>_<NAME>` becomes the secret `<NAME>`: with the prefix `WORKER_SECRET`, `WORKER_SECRET_API_KEY` sets `API_KEY`. The Worker keeps the secrets the file leaves out.
+  - An empty variable is an error, raised before anything is written. On GitHub Actions a secret that does not exist reads as empty, and uploading it would blank the Worker's secret. Leave a variable out to keep the Worker's current value.
+  - The file is JSON, in a new directory under the system's temporary directory, and only you can read it (`0600`). It is deleted once `run` settles, also when `run` throws. A process killed outright skips that, and leaves the file where still only you can read it.
+  - It returns what `run` returns.
+  - With `listSecrets`, the arguments that select the Worker for `wrangler secret list` (`["--config", config]` or `["--name", worker]`), it warns after `run` about each secret on the Worker that no variable sets, such as one left over from an earlier release. When it cannot read the list, that is a warning too, not a failure.
+  - `secretsFromEnv(prefix, env?)` returns the same secrets without writing them. Call it at the start of the script to refuse an empty variable before anything changes.
 - **Health check.** `checkDeploymentHealth(origin, options)` polls a fresh deployment until one of `paths` answers `2xx`.
   - It retries network errors and the statuses a deployment answers while it propagates (404, 429, 500, 502, 503, 504).
   - Any other status fails at once, because then the deployment is wrong rather than late.
@@ -53,20 +73,26 @@ In Worker code, import from the subpaths: the main entry also pulls in `node:chi
 
 ```ts
 import {
+  assertDeployedBindings,
   assertProductionBuildBranch,
   checkDeploymentHealth,
   requireCloudflareAccountId,
   requireEnv,
   runOrThrow,
+  withSecretsFile,
   wranglerCommand,
 } from "@rivi-software/cloudflare-deploy";
 
+const config = "dist/server/wrangler.json";
 assertProductionBuildBranch();
 const accountId = requireCloudflareAccountId();
 requireEnv("CLOUDFLARE_API_TOKEN");
-await runOrThrow(wranglerCommand(["deploy"]), {
-  env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId },
-});
+await assertDeployedBindings(config);
+await withSecretsFile({ prefix: "WORKER_SECRET" }, (path) =>
+  runOrThrow(wranglerCommand(["deploy", "--config", config, "--secrets-file", path]), {
+    env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId },
+  }),
+);
 await checkDeploymentHealth("https://app.example.com", { paths: ["/healthz", "/"] });
 ```
 
@@ -248,6 +274,8 @@ From `@rivi-software/cloudflare-deploy` (Node):
 | --- | --- |
 | `requireEnv(name, env?)`, `requireEnvMinLength(name, min, env?)`, `requireCloudflareAccountId(env?, name?)` | A variable's value, or an error that names it |
 | `assertProductionBuildBranch(env?, branch?)` | Refuses a production deploy from another branch in CI |
+| `assertDeployedBindings(config, options?)` | Refuses placeholder D1 and KV ids in a Wrangler config; options `environment` and `previews` |
+| `withSecretsFile(options, run)`, `secretsFromEnv(prefix, env?)` | The `<PREFIX>_*` secrets in a file only you can read, deleted after `run`; options `prefix`, `env` and `listSecrets` |
 | `checkDeploymentHealth(origin, options?)` | Polls a fresh deployment until it answers; options `paths`, `validate`, `attempts`, `delayMs`, `timeoutMs` |
 | `runCommand(args, options?)`, `runOrThrow(args, options?)` | Run a command; options `cwd`, `env`, `input` (written to stdin) and `capture` (collect the output) |
 | `binPath(name, from?)`, `wranglerCommand(args, from?)`, `nodeScript(script, args?)` | The arguments that run a project's binary, its Wrangler, or a TypeScript file through `tsx` |
@@ -255,7 +283,7 @@ From `@rivi-software/cloudflare-deploy` (Node):
 | `sleep(ms)`, `fileExists(path)` | A pause; whether a regular file exists |
 | `RETAIN_DAYS`, `retainBuildAssets(input)`, `planRetention(input)`, `readBuildFiles(clientDir)`, `previousAssetsTarget(config, configPath, env?)` | The deploy half of [skew protection](#skew-protection) |
 | Everything from `/cloudflare-api`, and from `/previous-assets` all but `assetKey` | |
-| Types | `Env`, `HealthCheckOptions`, `RunOptions`, `RunResult`, `AssetDeployConfig`, `AssetRecord`, `RetentionPlan` |
+| Types | `Env`, `BindingsConfig`, `DeployedBindingsOptions`, `SecretsFileOptions`, `HealthCheckOptions`, `RunOptions`, `RunResult`, `AssetDeployConfig`, `AssetRecord`, `RetentionPlan` |
 
 From `@rivi-software/cloudflare-deploy/cloudflare-api` (Node and Workers):
 
@@ -289,6 +317,8 @@ From `@rivi-software/cloudflare-deploy/testing` (Node and Workers, in tests):
 
 The tests in `tests/` cover:
 - the environment guards
+- the binding id check, on config objects and on JSON and JSONC files
+- the secrets file: what it holds, its mode, its removal, and the comparison with the Worker's secrets
 - the health check
 - the API client, against a fake `fetch`
 - the retention plan, and the deploy against a fake store
