@@ -256,6 +256,22 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
+  packages/workers-bundle-check:
+    dependencies:
+      ignore:
+        specifier: ^5.3.2
+        version: 5.3.2
+      minimatch:
+        specifier: ^10.2.5
+        version: 10.2.6
+    devDependencies:
+      vite:
+        specifier: 8.3.5
+        version: 8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+      wrangler:
+        specifier: 4.156.2
+        version: 4.156.2(@cloudflare/workers-types@5.20261102.1)(@types/node@22.20.5)
+
   packages/workers-mail:
     dependencies:
       '@opencoredev/email-sdk':
@@ -1929,6 +1945,10 @@ packages:
   human-id@4.2.2:
     resolution: {integrity: sha512-Z+8unD6em/MJwyrkWQ2M3wygRGI1+MztbutiNwk1DCuEPXOZRWGjtcMPZYP1exY9iNZMhd7ZOSMQSo9WYtiQRw==}
     hasBin: true
+
+  ignore@5.3.2:
+    resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
+    engines: {node: '>= 4'}
 
   import-meta-resolve@4.2.0:
     resolution: {integrity: sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==}
@@ -3941,6 +3961,8 @@ snapshots:
   highlight.js@10.7.3: {}
 
   human-id@4.2.2: {}
+
+  ignore@5.3.2: {}
 
   import-meta-resolve@4.2.0: {}
 
