@@ -1,5 +1,7 @@
 # @rivi-software/posthog-tanstack-start
 
+[![npm version](https://img.shields.io/npm/v/@rivi-software/posthog-tanstack-start?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/posthog-tanstack-start) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+
 [PostHog](https://posthog.com) error tracking for [TanStack Start](https://tanstack.com/start) apps on Cloudflare Workers:
 - the Worker's exceptions and events, through `posthog-node`
 - Start middlewares that report what server functions and server routes throw
@@ -8,6 +10,8 @@
 - the source map upload
 
 Your app keeps control of what it tracks: its own `posthog-js` options, such as consent, analytics and session replay.
+
+## Install
 
 ```bash
 npm install @rivi-software/posthog-tanstack-start posthog-node posthog-js
@@ -126,4 +130,19 @@ The package's tests run in Node: `vitest.config.ts` points `cloudflare:workers` 
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the [MIT License](LICENSE). Copyright © 2026 RIVI Software.
+
+<br>
+
+<p align="center">
+  <a href="https://rivi.software">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark-on-dark.svg">
+      <img src="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark.svg" alt="RIVI Software" width="36" height="36">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <sub>Part of <a href="https://github.com/rivi-software/tools#readme">RIVI tools</a>, the packages <a href="https://rivi.software">RIVI Software</a> builds its own apps with.</sub>
+</p>

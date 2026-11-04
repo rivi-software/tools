@@ -1,5 +1,7 @@
 # @rivi-software/semgrep-github-report
 
+[![npm version](https://img.shields.io/npm/v/@rivi-software/semgrep-github-report?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/semgrep-github-report) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+
 Reports [Semgrep](https://semgrep.dev) findings on GitHub with nothing but the job's `GITHUB_TOKEN`. On a pull request it keeps one comment up to date: it comments when findings first appear, edits that comment on every later run, and says so there once they are gone. On a full scan it lists the findings in the job summary. It needs no Semgrep account or `SEMGREP_APP_TOKEN`, files no issues, and does not fail a check over findings.
 
 `semgrep scan --json` leaves its findings in a file few people open, and Semgrep's own pull request comments come with its AppSec Platform, which needs an account and a token. This command turns the open-source CLI's JSON into the comment and the summary.
@@ -175,4 +177,19 @@ The tests in `tests/` cover the formatting (`index.test.ts`), the command agains
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the [MIT License](LICENSE). Copyright © 2026 RIVI Software.
+
+<br>
+
+<p align="center">
+  <a href="https://rivi.software">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark-on-dark.svg">
+      <img src="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark.svg" alt="RIVI Software" width="36" height="36">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <sub>Part of <a href="https://github.com/rivi-software/tools#readme">RIVI tools</a>, the packages <a href="https://rivi.software">RIVI Software</a> builds its own apps with.</sub>
+</p>

@@ -1,5 +1,7 @@
 # @rivi-software/workers-mail
 
+[![npm version](https://img.shields.io/npm/v/@rivi-software/workers-mail?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/workers-mail) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+
 Mail from Cloudflare Workers through [Amazon SES](https://aws.amazon.com/ses/) once a Worker holds SES's key, and through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/)'s `send_email` binding until then and whenever SES refuses a message. One call, `sendMail(env, mail)`, picks the transport, formats the addresses and headers for it, and answers with the `Message-ID` the message went out with, so a reply threads back.
 
 The binding needs no keys and sends from the day a domain is onboarded; SES takes larger messages and list mail, but needs a verified identity, production access and an IAM key first. With both set up, mail keeps going while SES is not ready yet, and when SES refuses a message (an identity not verified yet, a policy that does not allow the address, a throttle) the binding sends it instead. SES goes through the [Email SDK](https://email-sdk.dev/docs/adapters/ses) (`@opencoredev/email-sdk`), which signs SES's API v2 requests with `fetch` and Web Crypto, so the Worker needs no AWS SDK.
@@ -161,4 +163,19 @@ The tests in `tests/` cover both transports and the fallback between them agains
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the [MIT License](LICENSE). Copyright © 2026 RIVI Software.
+
+<br>
+
+<p align="center">
+  <a href="https://rivi.software">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark-on-dark.svg">
+      <img src="https://raw.githubusercontent.com/rivi-software/tools/main/assets/rivi-mark.svg" alt="RIVI Software" width="36" height="36">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <sub>Part of <a href="https://github.com/rivi-software/tools#readme">RIVI tools</a>, the packages <a href="https://rivi.software">RIVI Software</a> builds its own apps with.</sub>
+</p>
