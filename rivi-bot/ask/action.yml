@@ -7,7 +7,7 @@ branding:
 
 # Claude reads the thread and the code, and answers in a fixed shape (--json-schema). It can read
 # files and nothing else: no commands, no edits, no GitHub tools. The step after it posts the
-# answer: in the review thread the question was asked in, or else in a comment.
+# answer.
 
 inputs:
   anthropic-api-key:
@@ -28,10 +28,6 @@ inputs:
   question:
     description: The question.
     required: true
-  thread:
-    description: For a question asked in a review thread, the id of the review comment that starts it. The answer is a reply in that thread.
-    required: false
-    default: ""
   model:
     description: The Claude model.
     required: false
@@ -54,7 +50,6 @@ runs:
         GH_REPO: ${{ github.repository }}
         NUMBER: ${{ inputs.number }}
         HEAD_SHA: ${{ inputs.head-sha }}
-        THREAD: ${{ inputs.thread }}
       run: |
         set -euo pipefail
         if [ -z "$NUMBER" ]; then
@@ -70,21 +65,12 @@ runs:
           if ! gh api -H 'Accept: application/vnd.github.diff' "repos/$GITHUB_REPOSITORY/compare/$(jq -r .base.sha <<< "$pr")...$head_sha" > "$dir/changes.diff"; then
             echo "The diff is too large to fetch; thread.json lists the changed files, and the checkout has them." > "$dir/changes.diff"
           fi
-          comments=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/comments" --paginate | jq -s '[.[][]]')
-          jq '[.[] | {path, line, author: .user.login, body}]' <<< "$comments" > "$dir/review-comments.json"
-          files="thread.json (the pull request and its conversation), changes.diff (its changes) and review-comments.json (the comments on its lines)"
-          if [ -n "$THREAD" ]; then
-            # The review thread the question was asked in: its place in the diff, and its comments.
-            jq --argjson root "$THREAD" '(map(select(.id == $root)) | first // {}) as $start
-              | {path: $start.path, line: ($start.line // $start.original_line), diff_hunk: $start.diff_hunk, url: $start.html_url,
-                 comments: [.[] | select(.id == $root or .in_reply_to_id == $root) | {author: .user.login, body}]}' \
-              <<< "$comments" > "$dir/review-thread.json"
-            files="$files; review-thread.json is the review thread the question was asked in: its file, line, diff and comments, oldest first"
-          fi
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/comments" --paginate |
+            jq -s '[.[][] | {path, line, author: .user.login, body}]' > "$dir/review-comments.json"
           {
             echo "kind=pull request"
             echo "ref=$head_sha"
-            echo "files=$files"
+            echo "files=thread.json (the pull request and its conversation), changes.diff (its changes) and review-comments.json (the comments on its lines)"
           } >> "$GITHUB_OUTPUT"
         else
           gh issue view "$NUMBER" --json number,title,body,author,state,labels,comments > "$dir/thread.json"
@@ -130,7 +116,7 @@ runs:
           --allowedTools "Read,Glob,Grep"
           --json-schema '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}'
         prompt: |
-          A maintainer of ${{ github.repository }} asks about ${{ steps.thread.outputs.kind }} #${{ inputs.number }}${{ inputs.thread != '' && ', in a review thread (review-thread.json); "this" and "here" point at its lines' || '' }}:
+          A maintainer of ${{ github.repository }} asks about ${{ steps.thread.outputs.kind }} #${{ inputs.number }}:
 
           ${{ inputs.question }}
 
@@ -147,7 +133,6 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         NUMBER: ${{ inputs.number }}
         QUESTION: ${{ inputs.question }}
-        THREAD: ${{ inputs.thread }}
         RESULT: ${{ steps.claude.outputs.structured_output }}
       run: |
         set -euo pipefail
@@ -155,13 +140,7 @@ runs:
           echo "::error::Claude did not answer."
           exit 1
         fi
-        answer=$(jq -r '.answer | gsub("^\\s+|\\s+$"; "")' <<< "$RESULT")
-        # In a review thread the answer follows the question; in a conversation it quotes it.
-        if [ -n "$THREAD" ]; then
-          gh api --method POST "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/comments/$THREAD/replies" -f body="$answer" --silent
-          echo "Answered in the review thread on #$NUMBER."
-        else
-          body=$(jq -rn --arg question "$QUESTION" --arg answer "$answer" '($question | split("\n") | map("> \(.)") | join("\n")) + "\n\n" + $answer')
-          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" -f body="$body" --silent
-          echo "Answered on #$NUMBER."
-        fi
+        body=$(jq -rn --arg question "$QUESTION" --argjson result "$RESULT" '
+          ($question | split("\n") | map("> \(.)") | join("\n")) + "\n\n" + ($result.answer | gsub("^\\s+|\\s+$"; ""))')
+        gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" -f body="$body" --silent
+        echo "Answered on #$NUMBER."

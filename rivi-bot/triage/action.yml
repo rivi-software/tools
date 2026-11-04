@@ -206,7 +206,7 @@ runs:
               (if $prompt then .prompt | text | select(. != "")
                 | "<details>\n<summary>A prompt for a coding agent</summary>\n\n\(fence)text\n\(.)\n\(fence)\n\n</details>"
                else empty end),
-              "<sub>rivi-bot triaged this issue, and edits this comment when asked again with `@rivi-bot triage`. A maintainer decides what happens next.</sub>"
+              "<sub>rivi-bot triaged this issue, and edits this comment when asked again with `/rivi-bot triage`. A maintainer decides what happens next.</sub>"
             ] | join("\n\n")' <<< "$RESULT")
 
         # One triage comment per issue: a later triage edits it.

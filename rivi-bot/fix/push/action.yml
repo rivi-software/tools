@@ -130,7 +130,7 @@ runs:
           fi
           body=$(printf 'rivi-bot pushed %s with fixes.\n\n%s\n\n<sub>%s</sub>' "$COMMIT" "$SUMMARY" "$note")
         elif [ "$MOVED" = true ]; then
-          body="The branch moved on from $HEAD_SHA while rivi-bot worked on it, so the fix was not pushed. Ask again, as \`@rivi-bot /fix\`, to fix the new head."
+          body="The branch moved on from $HEAD_SHA while rivi-bot worked on it, so the fix was not pushed. \`/rivi-bot fix\` tries again on the new head."
         elif [ -n "$SUMMARY" ]; then
           body=$SUMMARY
         else

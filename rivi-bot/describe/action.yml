@@ -160,7 +160,7 @@ runs:
         if [ "$WRITE_SUMMARY" = true ] && [ -n "$summary" ]; then
           body=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body // ""')
           body=$(jq -rn --arg body "$body" --arg summary "$summary" --arg sha "${HEAD_SHA:0:7}" '
-            "<!-- rivi-bot:summary -->\n### Summary by rivi-bot\n\n\($summary)\n\n<sub>Of \($sha). rivi-bot edits only this section; `@rivi-bot describe` writes it again.</sub>\n<!-- /rivi-bot:summary -->" as $section
+            "<!-- rivi-bot:summary -->\n### Summary by rivi-bot\n\n\($summary)\n\n<sub>Of \($sha). rivi-bot edits only this section; `/rivi-bot describe` writes it again.</sub>\n<!-- /rivi-bot:summary -->" as $section
             | "<!-- rivi-bot:summary -->[\\s\\S]*?<!-- /rivi-bot:summary -->" as $old
             | if ($body | test($old)) then $body | sub($old; $section)
               elif ($body | test("^\\s*$")) then $section
