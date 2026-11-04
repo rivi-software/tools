@@ -177,7 +177,8 @@ runs:
 
     # The diff, the inline comments and the review all name `head-sha`, so a push mid-run cannot
     # move the review onto a commit Claude did not read. A follow-up review is smaller: less
-    # effort, fewer turns, a lower budget. Each gh command in the prompt is spelled out exactly
+    # effort, fewer turns, a lower budget. A whole review has turns to read a large pull request,
+    # so its budget is what stops it. Each gh command in the prompt is spelled out exactly
     # as the allowlist permits it; headless, a tool outside --allowedTools is denied, not asked.
     # The explicit prompt selects the action's agent mode: no tracking comment, no trigger
     # check of its own, only the tools named here.
@@ -202,7 +203,7 @@ runs:
         claude_args: >-
           --model ${{ inputs.model }}
           --effort ${{ steps.changes.outputs.scope == 'changes' && 'medium' || 'high' }}
-          --max-turns ${{ steps.changes.outputs.scope == 'changes' && 20 || 40 }}
+          --max-turns ${{ steps.changes.outputs.scope == 'changes' && 20 || 120 }}
           --max-budget-usd ${{ steps.changes.outputs.scope == 'changes' && 3 || 10 }}
           --setting-sources user
           --strict-mcp-config
