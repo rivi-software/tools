@@ -1,7 +1,7 @@
 {
   "name": "@rivi-software/cloudflare-deploy",
   "version": "0.1.1",
-  "description": "Deploy helpers for Cloudflare Workers apps: environment guards, a post-deploy health check, a REST API client for D1, KV, R2 and Workers for Platforms, and skew protection that keeps earlier builds' client files served after a deploy",
+  "description": "Deploy helpers for Cloudflare Workers apps: environment guards, a post-deploy health check, a REST API client for D1, KV, R2 and Workers for Platforms, skew protection that keeps earlier builds' client files served after a deploy, and test doubles: a fake of that API and a KV namespace that serves stale reads",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -16,6 +16,10 @@
     "./previous-assets": {
       "types": "./dist/previous-assets.d.ts",
       "default": "./dist/previous-assets.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
     }
   },
   "bin": {
@@ -42,7 +46,8 @@
     "kv",
     "r2",
     "workers-for-platforms",
-    "skew-protection"
+    "skew-protection",
+    "testing"
   ],
   "repository": {
     "type": "git",
