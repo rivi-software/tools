@@ -120,7 +120,7 @@ housekeeping:
 
 Someone with write access asks rivi-bot in a comment that speaks to `@rivi-bot`: on a pull request, on an issue, or in a review thread on a pull request's lines.
 
-- **A command.** A command right after the mention, with its slash or alone, runs as it is: `@rivi-bot /fix only the null check`, `@rivi-bot review`. What follows the command, to the end of the comment, is passed along.
+- **A command.** A command right after the mention, with its slash or alone, runs as it is: `@rivi-bot /fix only the null check`, `@rivi-bot review`. What follows the command, to the end of the comment, is passed along, code and quoted lines included.
 - **Plain words.** Any other request goes to Claude, which reads it with the issue or pull request, the review thread and the latest comments, and picks the one action that does what it asks, or none: `@rivi-bot rename this to fetchAll` is a fix, `@rivi-bot why does this retry?` is a question, and a thank-you is nothing. A question about a change is answered rather than made. Routing is one call to the top-level `model` at low effort, with no tools. Should it fail, a command the comment opens with is taken.
 - **Reactions.** The comment gets eyes (👀) while the job runs, then a rocket (🚀). When rivi-bot can't do what it asks (the feature is off, the action does not work there, the pull request is closed or comes from a fork), or a job it ran fails, the comment gets a confused face (😕) and a reply that says why.
 
@@ -159,7 +159,7 @@ In a review thread, `ask` answers in the thread and `fix` does what the thread a
 - **Approvals.** An approval stands for the commit it read. Before a review of a later commit, the reviewer's earlier approvals on the pull request are dismissed, and the new review approves again if nothing has to change.
 - **Follow-up reviews.** After an earlier review by the same login, it reads only what changed since the commit that review read. It replays that commit's changes onto the pull request's current fork point (`git merge-tree`), so a rebase onto the base, or a merge of it, is not reviewed again. If nothing changed but the base, there is no review.
 - **Budget.**
-  - A whole pull request runs at high effort, with up to 120 turns and $10: the turns let it read a large pull request, and the budget is what stops it.
+  - A whole pull request runs at high effort, with up to 120 turns and $10: the turns let it read a large pull request, and the budget is what stops it. The reusable workflow gives the job 60 minutes for that; a review that runs out of time says so on the pull request.
   - A follow-up runs at medium effort, with up to 20 turns and $3.
   - The API key's workspace spend limit is the hard cap.
 
@@ -243,7 +243,7 @@ jobs:
   review:
     if: github.event.label.name == 'rivi-bot:review'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     concurrency:
       group: review-${{ github.event.pull_request.number }}
     permissions:

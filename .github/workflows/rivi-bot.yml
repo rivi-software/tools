@@ -194,21 +194,26 @@ jobs:
           # one in code, asks nothing. A command named right after the first mention is `named`:
           # `slash` with its slash (@rivi-bot /fix …), `alone` with nothing else in the comment
           # (@rivi-bot review), `leading` when the comment opens with it. `requests` is what the
-          # comment asks of each command: what follows `@rivi-bot /<command>`, or else the comment
-          # without the mention it opens with and the command word, with any other mention read as
-          # rivi-bot. `request` is the comment as Claude reads it to route it, empty for a bare
-          # mention. `/rivi-bot <command>` at the start reads as `@rivi-bot /<command>`. (A
-          # lookbehind cannot take jq's "i" flag, so the case is folded inside the patterns.)
+          # comment asks of each command: what follows `@rivi-bot /<command>`, to the end of the
+          # comment, code and quoted lines included; or else the comment without the mention it
+          # opens with and the command word, with any other mention read as rivi-bot. `request` is
+          # the comment as Claude reads it to route it, empty for a bare mention. `/rivi-bot
+          # <command>` at the start reads as `@rivi-bot /<command>`. `spoken` blanks out code and
+          # quoted lines rather than removing them, so an offset in it is the same offset in the
+          # comment. (A lookbehind cannot take jq's "i" flag, so the case is folded inside the
+          # patterns.)
           read -r -d '' parse << 'JQ' || true
           def at: "(?<![\\w-])@(?i:rivi-bot)(?![\\w-])";
           def strip: sub("\\A\\s+"; "") | sub("\\s+\\z"; "");
           def unhtml: gsub("<!--[\\s\\S]*?-->"; "");
-          def unquoted: split("\n") | map(select(test("\\A\\s*>") | not)) | join("\n");
-          def spoken: unhtml | gsub("```[\\s\\S]*?```"; "") | gsub("`[^`\\n]*`"; "") | unquoted;
+          def blank: explode | map(if . == 10 then . else 32 end) | implode;
+          def spoken: unhtml
+            | gsub("(?<c>```[\\s\\S]*?```)"; .c | blank) | gsub("(?<c>`[^`\\n]*`)"; .c | blank)
+            | split("\n") | map(if test("\\A\\s*>") then blank else . end) | join("\n");
           def given($c):
-            [unhtml | gsub("```[\\s\\S]*?```"; "") | unquoted
-              | match(at + "[ \\t]+/(?i:" + $c + ")(?![\\w-])[ \\t]*(?<text>[\\s\\S]*)")]
-            | first | if . then .captures[0].string | strip else null end;
+            unhtml as $s
+            | [$s | spoken | match(at + "[ \\t]+/(?i:" + $c + ")(?![\\w-])[ \\t]*")] | first
+            | if . then $s[.offset + .length:] | strip else null end;
           def request($c):
             given($c) // (unhtml
               | sub("\\A\\s*" + at + "[ \\t]*[,:]?[ \\t]*((?i:" + $c + ")(?![\\w-])[ \\t]*[,:]?)?"; "")
@@ -581,7 +586,8 @@ jobs:
     needs: gate
     if: needs.gate.outputs.review == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Room for a whole pull request's 120 turns, so its budget stops it before the clock does.
+    timeout-minutes: 60
     # One review of a pull request at a time; none that started is cancelled, since a
     # half-posted review helps nobody. Of the pushes that wait, only the latest is reviewed.
     concurrency:
@@ -628,9 +634,12 @@ jobs:
           instructions: ${{ needs.gate.outputs.instructions }}
           model: ${{ fromJSON(needs.gate.outputs.config).review.model }}
 
-      # A review someone asked for in a comment is reported on the comment, by the report job.
+      # A review someone asked for in a comment is reported on the comment, by the report job. A
+      # review that runs out of time is cancelled, not failed.
       - name: Report a failed review
-        if: failure() && steps.review.conclusion == 'failure' && needs.gate.outputs.comment-id == ''
+        if: >-
+          (failure() || cancelled()) && needs.gate.outputs.comment-id == '' &&
+          (steps.review.conclusion == 'failure' || steps.review.conclusion == 'cancelled')
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.gate.outputs.number }}
@@ -874,7 +883,7 @@ jobs:
           fi
           ended=$(jq -r '[to_entries[] | select(.key != "acknowledge")
             | if .value.result == "failure" then "its \(.key) job failed"
-              elif .value.result == "cancelled" then "its \(.key) job was cancelled, as when a newer request takes its place"
+              elif .value.result == "cancelled" then "its \(.key) job was cancelled (it ran out of time, or a newer request took its place)"
               else empty end] | join("; ")' <<< "$NEEDS")
           if [ -z "$ended" ]; then
             react rocket
