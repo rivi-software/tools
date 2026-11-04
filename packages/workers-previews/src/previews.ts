@@ -45,8 +45,11 @@ export async function previewInventory(
   return (await inventory(target)).entries;
 }
 
+/** What `sweepPreviews` found, and what it deleted. */
 export type SweepResult = {
+  /** Every Preview of the Worker, with its owner and the sweep's verdict. */
   entries: PreviewEntry[];
+  /** The deletes that clear the stale Previews, each one tried once with `apply`. */
   targets: SweepTarget[];
   /** The Previews deleted; empty without `apply`. */
   deleted: string[];

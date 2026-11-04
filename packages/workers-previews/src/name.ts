@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
  */
 export const MAX_LABEL_LENGTH = 63;
 
+/** The options of `previewName`. */
 export type PreviewNameOptions = {
   /** The branch production deploys from, which never gets a Preview. Default `main`. */
   productionBranch?: string;
