@@ -130,6 +130,18 @@ describe("withSecretsFile", () => {
     expect(warn.mock.calls[1][0]).toContain("printed no list of secrets");
   });
 
+  test("warns, without failing the deploy, when Wrangler cannot be started", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(runCommand).mockRejectedValueOnce(new Error("spawn wrangler ENOENT"));
+    await expect(
+      withSecretsFile({ prefix: "WORKER_SECRET", env, listSecrets: [] }, () => "deployed"),
+    ).resolves.toBe("deployed");
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0][0]).toBe(
+      "Could not compare the Worker's secrets with WORKER_SECRET_*: Error: spawn wrangler ENOENT",
+    );
+  });
+
   test("never lists secrets without listSecrets", async () => {
     await withSecretsFile({ prefix: "WORKER_SECRET", env }, () => {});
     expect(runCommand).not.toHaveBeenCalled();
