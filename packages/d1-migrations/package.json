@@ -1,0 +1,71 @@
+{
+  "name": "@rivi-software/d1-migrations",
+  "version": "0.1.0",
+  "description": "D1 migrations from inside a Worker, for databases an app creates at runtime: the same files, order and d1_migrations table as wrangler d1 migrations apply, and a journal of hashes that fails CI when an applied migration is edited",
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "d1",
+    "migrations",
+    "sqlite",
+    "wrangler",
+    "multi-tenant"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./bundle": {
+      "types": "./dist/bundle.d.ts",
+      "default": "./dist/bundle.js"
+    },
+    "./journal": {
+      "types": "./dist/journal.d.ts",
+      "default": "./dist/journal.js"
+    }
+  },
+  "bin": {
+    "d1-migrations": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "minimatch": "^10.2.5"
+  },
+  "peerDependencies": {
+    "wrangler": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "wrangler": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261102.1",
+    "miniflare": "5.20261102.0-beta",
+    "wrangler": "4.156.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/d1-migrations"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/d1-migrations#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": {
+    "access": "public"
+  }
+}
