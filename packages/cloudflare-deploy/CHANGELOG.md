@@ -1,5 +1,11 @@
 # @rivi-software/cloudflare-deploy
 
+## 0.3.0
+
+### Minor Changes
+
+- a91cda8: Add `assertDeployedBindings` and `withSecretsFile`. `assertDeployedBindings(config)` reads a Wrangler config, from a JSON or JSONC file or as an object, and throws one error that lists every D1 or KV binding whose id is a placeholder: a D1 `database_id` that is not a UUID, a KV `id` that is not 32 hexadecimal characters, or an all-zero id. A binding without an id passes, as Wrangler provisions it. `environment` and `previews` check the block that `wrangler deploy --env` or `wrangler preview` deploys. `withSecretsFile({ prefix }, run)` turns each `<PREFIX>_<NAME>` variable into the secret `<NAME>`, writes them to a JSON file only its owner can read, hands its path to `run` for `wrangler deploy --secrets-file`, and deletes it also when `run` throws. It refuses empty variables, which is how GitHub Actions passes a secret that does not exist. With `listSecrets` it warns about secrets on the Worker that no variable sets. `secretsFromEnv(prefix)` collects the same secrets without writing them, so a script can refuse an empty one before it applies migrations.
+
 ## 0.2.0
 
 ### Minor Changes
