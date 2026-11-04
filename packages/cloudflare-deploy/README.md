@@ -8,6 +8,7 @@ Deploy helpers for apps on Cloudflare Workers:
 - child-process helpers
 - a small client for the Cloudflare REST API, covering the resources an app creates at runtime (D1, KV, R2, Workers for Platforms)
 - skew protection, which keeps earlier builds' client files served after a deploy, so a tab still running the previous build can load its lazy chunks
+- test doubles: a fake of that REST API, and a KV namespace whose reads go stale as they do on Cloudflare
 
 ## Install
 
@@ -15,15 +16,16 @@ Deploy helpers for apps on Cloudflare Workers:
 npm install @rivi-software/cloudflare-deploy
 ```
 
-The package is ESM only. The deploy helpers need Node 22 or later. `/cloudflare-api` and `/previous-assets` use only web APIs, so they run in a Worker as well.
+The package is ESM only. The deploy helpers need Node 22 or later. `/cloudflare-api`, `/previous-assets` and `/testing` use only web APIs, so they run in a Worker as well.
 
 ## Entry points
 
 | Entry point | Contents | Runs in |
 | --- | --- | --- |
-| `@rivi-software/cloudflare-deploy` | Everything below | Node (deploy scripts) |
+| `@rivi-software/cloudflare-deploy` | Everything below except `/testing` | Node (deploy scripts) |
 | `@rivi-software/cloudflare-deploy/cloudflare-api` | The API client alone | Node and Workers |
 | `@rivi-software/cloudflare-deploy/previous-assets` | The Worker half of [skew protection](#skew-protection) | Workers |
+| `@rivi-software/cloudflare-deploy/testing` | The [test doubles](#testing) | Node and Workers (tests) |
 | `cloudflare-retain-assets` (bin) | The deploy half of skew protection | Node |
 
 In Worker code, import from the subpaths: the main entry also pulls in `node:child_process` and `node:fs` through the process helpers.
@@ -145,6 +147,93 @@ export default {
 
 The first deploy after the store exists keeps only its own build, so it cannot protect tabs on the build before it. To inspect a store, run `wrangler kv key get record --namespace-id <id> --remote`.
 
+## Testing
+
+`/testing` holds two test doubles for code that works with Cloudflare. Neither of them calls Cloudflare.
+
+### A fake of the REST API
+
+`createFakeCloudflareApi(options?)` keeps D1 databases, KV namespaces, R2 buckets and Workers for Platforms scripts in memory. It serves every endpoint the [client](#cloudflare-api-client) calls, with Cloudflare's envelopes, statuses and error codes. Give the client the fake's `fetch`, or pass the whole fake as the client's options: it carries `accountId`, `token` and `fetch`.
+
+```ts
+import { cloudflareApi } from "@rivi-software/cloudflare-deploy/cloudflare-api";
+import { createFakeCloudflareApi } from "@rivi-software/cloudflare-deploy/testing";
+
+const fake = createFakeCloudflareApi();
+const api = cloudflareApi({ accountId: fake.accountId, token: "test", fetch: fake.fetch });
+await provisionCustomer(api, "acme");
+expect(fake.state.d1.databases.map((db) => db.name)).toContain("customer-acme");
+```
+
+- **State.** `fake.state` holds what exists in plain arrays: `d1.databases`, `kv.namespaces`, `r2.buckets` and `dispatch.scripts`. A test reads them, or changes them to set up a case. For example, `bucket.objects = 3` gives a bucket that cannot be deleted, and `database.sql` is what an export of the database serves.
+- **Calls.** `fake.calls` logs each call as its method and its path under the account, as sent: `"POST /d1/database"`. `fake.creates` counts the D1 databases, KV namespaces, R2 buckets and dispatch scripts made.
+- **Failures.** `fake.failNext(method, pattern, failure?)` fails the next call whose path matches `pattern`. By default the call answers 500 with code 10000; `status`, `code` and `message` change that. `network` makes the request fail on the way instead. `apply` carries the call out first, as when Cloudflare acted but its answer was lost. `skip` lets that many matching calls through first, and `times` fails that many. `clearFailures()` drops the failures that have not happened yet. With these, a test can show that a retry after any failure creates nothing twice.
+- **Exports.** A D1 export finishes on the second poll. Its `signedUrl` points at a `.test` host that only the fake's `fetch` serves.
+- **Other hosts.** The fake's `fetch` throws for any origin but the API's, so code under test can't reach the network through it.
+- **Options.** `accountId` (32 `f`s by default), `token` (by default any bearer token passes) and `now`, the clock for creation times.
+
+The fake answers these requests as Cloudflare does:
+
+| Request | Answer |
+| --- | --- |
+| For another account | 403, code 9109 |
+| With a token other than `token`, when you set one | 403, code 10000 |
+| To a path the fake does not serve | 400, code 7000 |
+| With a body that is not JSON | 400, code 6007 |
+| D1: a database that does not exist | 404, code 7404 |
+| D1: a create without a name, or an unknown read replication mode | 400, code 7400 |
+| D1: a create with a name that is taken | 400, code 7502 |
+| KV: a namespace that does not exist | 404, code 10013 |
+| KV: a create with a title that is taken | 400, code 10014 |
+| KV: a value that does not exist | 404, code 10009 |
+| R2: a create with an invalid bucket name | 400, code 10005 |
+| R2: a bucket that does not exist, or one asked for outside its jurisdiction | 404, code 10006 |
+| R2: a create with a name taken in that jurisdiction | 409, code 10073 |
+| R2: deleting a bucket that holds objects | 409, code 10008 |
+| Dispatch: reading a script that does not exist | 200 with `script: null` |
+| Dispatch: deleting, or setting secrets or tags on, a script that does not exist | 404, code 10007 |
+| Dispatch: an upload without its `main_module`, with a D1 binding that has no id, or with a migration step that does not fit the script's classes | 400, code 10021 |
+| Dispatch: a migration whose `old_tag` is not the script's current tag | 400, code 10079 |
+| Dispatch: a Durable Object binding to a class the script does not have | 400, code 10061 |
+
+An upload also drops the script's secrets unless its `keep_bindings` includes `secret_text`.
+
+Some codes are a best guess, because Cloudflare's documentation names none: 9109, 6007, 10061, 10021 for the migration checks, and the codes for malformed KV and R2 bodies the client never sends. A test that depends on one of these should check the status as well.
+
+### A KV namespace that serves stale reads
+
+`memoryKv(options?)` is a KV namespace in memory. Unlike a local KV, it also models Cloudflare's cache. Each location keeps what it read, the value or its absence, for `cacheTtl` seconds (60 by default). A write is visible at once in the location that made it, and elsewhere only once that location's copy runs out. `location()` gives another location over the same keys, so a test can write in one and read the old value in the other.
+
+```ts
+import { memoryKv } from "@rivi-software/cloudflare-deploy/testing";
+
+vi.useFakeTimers();
+const kv = memoryKv();
+const elsewhere = kv.location();
+await elsewhere.get("flag"); // null, and that location keeps the null for 60 s
+await kv.put("flag", "on");
+await kv.get("flag"); // "on"
+await elsewhere.get("flag"); // still null
+vi.advanceTimersByTime(60_000);
+await elsewhere.get("flag"); // "on"
+
+const env = { FLAGS: kv as unknown as KVNamespace };
+```
+
+- **The binding's methods.** `get` and `getWithMetadata` (one key, or a map for up to 100), `put`, `delete` and `list` behave as on the binding, and `cacheStatus` is always `null`. Its types do not come from `@cloudflare/workers-types`, so cast it where code wants a `KVNamespace`. `list` reads the keys as they are now, without a cache.
+- **Limits.** Errors are worded like the runtime's. It refuses:
+  - keys of 0 or over 512 bytes, and the keys `.` and `..`
+  - values over 25 MiB, and metadata over 1024 bytes as JSON
+  - a `cacheTtl` under 30 seconds
+  - an `expiration` or `expirationTtl` under 60 seconds from now
+  - a bulk read of over 100 keys, or of types other than text and JSON
+  - a `list` page of over 1000 keys
+
+  `list` returns keys in UTF-8 byte order, as KV does, with a `cursor` for the next page.
+- **Inspecting.** `operations` counts each location's `get`, `put`, `delete` and `list` calls, and its `coldReads`, the reads its cache did not answer. `dump()` returns the live keys with their values as text.
+- **Failures.** `failPuts(count)` makes the next `count` puts, in any location, throw the 429 KV answers when one key is written too often.
+- **Clock.** `now`, in milliseconds, defaults to `Date.now`, so fake timers move it.
+
 ## Limits
 
 - **`/assets/` at the root.** Skew protection covers the files Vite writes under its default `build.assetsDir` (`assets`) and serves at `/assets/…`, under the default `base`. With another `assetsDir`, the command finds no `assets/` directory and fails (`No build files in …`); under another `base`, the Worker's requests for old files are not under `/assets/`, so `isAssetRequest` passes them by.
@@ -187,6 +276,15 @@ From `@rivi-software/cloudflare-deploy/previous-assets` (Workers):
 | `PREVIOUS_ASSETS_BINDING`, `ASSET_PATH_PREFIX` | `PREVIOUS_ASSETS` and `/assets/` |
 | Types | `PreviousAssetStore`, the part of a KV binding it reads; `PreviousAssetMetadata` |
 
+From `@rivi-software/cloudflare-deploy/testing` (Node and Workers, in tests):
+
+| Export | What |
+| --- | --- |
+| `createFakeCloudflareApi({ accountId?, token?, now? })` | The [fake of the REST API](#a-fake-of-the-rest-api): `accountId`, `token`, `fetch`, `state`, `calls`, `creates`, `failNext(method, pattern, failure?)`, `clearFailures()` |
+| `memoryKv({ now? })` | A [KV namespace that serves stale reads](#a-kv-namespace-that-serves-stale-reads) |
+| `MemoryKv` | Its class: the binding's methods, plus `location()`, `operations`, `dump()` and `failPuts(count)` |
+| Types | `FakeCloudflareApi`, `FakeCloudflareApiOptions`, `FakeFailure`, `FakeD1Database`, `FakeKvNamespace`, `FakeKvValue`, `FakeR2Bucket`, `FakeScript`, `FakeScriptModule`, `MemoryKvOptions`, `KvValueType`, `KvReadOptions`, `KvPutOptions`, `KvListOptions`, `KvListKey`, `KvListResult`, `KvValueWithMetadata`, `KvOperations` |
+
 ## Development
 
 The tests in `tests/` cover:
@@ -195,6 +293,8 @@ The tests in `tests/` cover:
 - the API client, against a fake `fetch`
 - the retention plan, and the deploy against a fake store
 - the Worker's fallback
+- the fake of the REST API, through the real client
+- the KV namespace's cache, limits and listing
 
 None of them calls Cloudflare. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
 
