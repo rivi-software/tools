@@ -8,6 +8,10 @@ allowBuilds:
   "@posthog/cli": false
   # core-js only prints a funding message.
   core-js: false
+  # esbuild and workerd (through wrangler and miniflare, which @rivi-software/d1-migrations tests
+  # against) take their binaries from optional platform packages; the scripts only check them.
+  esbuild: false
+  workerd: false
 
 # Supply-chain policy: no transitive dependencies from git or tarball URLs.
 blockExoticSubdeps: true

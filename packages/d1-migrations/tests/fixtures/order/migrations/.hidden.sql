@@ -1,0 +1,1 @@
+CREATE TABLE hidden (id INTEGER);

@@ -1,0 +1,1 @@
+CREATE TABLE ten (id INTEGER);
