@@ -35,6 +35,7 @@ export interface D1DatabaseLike {
   batch(statements: D1StatementLike[]): Promise<unknown>;
 }
 
+/** What {@link migrateD1} resolves to once every migration the database lacked is applied. */
 export type MigrateD1Result = {
   /** The migrations this call applied, in order. Empty when the database was up to date. */
   applied: string[];

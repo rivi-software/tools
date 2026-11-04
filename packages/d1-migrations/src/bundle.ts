@@ -11,11 +11,16 @@ import { DEFAULT_MIGRATIONS_TABLE, type D1Migration } from "./index.js";
 export { compareMigrationPaths, listMigrationFiles } from "./files.js";
 export type { MigrationFile, MigrationFiles, MigrationsSource } from "./files.js";
 
+/**
+ * Where {@link readD1Migrations} finds the migrations, and the table that records them: the D1
+ * binding's fields in the Wrangler config.
+ */
 export type ReadD1MigrationsOptions = MigrationsSource & {
   /** The binding's `migrations_table`. Default `d1_migrations`. */
   table?: string;
 };
 
+/** {@link readD1Migrations}'s options, and the module {@link bundleD1Migrations} writes. */
 export type BundleD1MigrationsOptions = ReadD1MigrationsOptions & {
   /**
    * The module to write, relative to `cwd`. A `.ts` file gets type annotations; any other gets
@@ -24,10 +29,13 @@ export type BundleD1MigrationsOptions = ReadD1MigrationsOptions & {
   out: string;
 };
 
+/** What {@link bundleD1Migrations} put in the module, and whether it wrote it. */
 export type BundleD1MigrationsResult = {
   /** The module's absolute path. */
   out: string;
+  /** The migrations table the module names. */
   table: string;
+  /** The migrations in the module, in Wrangler's order, each split into its statements. */
   migrations: D1Migration[];
   /** Whether the module changed. An unchanged module is not written, so no watcher wakes. */
   changed: boolean;
