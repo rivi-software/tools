@@ -61,45 +61,57 @@ export type WorkerBundleProblem = (
   | {
       /** A Worker file holds modules a rule forbids, largest first. */
       kind: "forbidden-module";
+      /** The rule the modules break. */
       rule: ForbiddenRule;
+      /** The Worker file that holds them. */
       file: string;
+      /** The modules the rule's pattern matches, and the bytes each renders in the file. */
       modules: BundledModule[];
     }
   | {
       /** A Worker file contains a forbidden marker. */
       kind: "forbidden-marker";
+      /** The rule whose marker the file contains. */
       rule: ForbiddenRule;
+      /** The Worker file that contains it. */
       file: string;
     }
   | {
       /** A rule's module pattern or marker matches nothing the project has. */
       kind: "stale-rule";
+      /** The rule that guards nothing. */
       rule: ForbiddenRule;
+      /** The part of it that matches nothing. */
       part: "module" | "marker";
     }
   | {
       /** A Worker file has no source map, so the rules cannot see its modules. */
       kind: "missing-source-map";
+      /** The Worker file without a map. */
       file: string;
     }
   | {
       /** A `.map` file the assets would serve. */
       kind: "served-source-map";
+      /** The map, in the assets directory. */
       file: string;
     }
   | {
       /** A script or style the assets would serve with its source map inline. */
       kind: "inline-source-map";
+      /** The script or style, in the assets directory. */
       file: string;
     }
   | {
       /** A value shaped like a secret, in a Worker file or a served asset. */
       kind: "secret";
+      /** The Worker file or served asset that holds the value. */
       file: string;
       /** The pattern's name. */
       name: string;
       /** The first 16 hexadecimal digits of the value's SHA-256; the value is never reported. */
       fingerprint: string;
+      /** The line the value is on, from 1. */
       line: number;
       /** The module the value comes from, when the file has a source map. */
       module?: string;
@@ -107,6 +119,7 @@ export type WorkerBundleProblem = (
   | {
       /** An allowed secret that matches no finding. */
       kind: "stale-allowed-secret";
+      /** The entry of `allowedSecrets` that matches nothing. */
       allowed: AllowedSecret;
     }
 ) & {
@@ -130,6 +143,7 @@ export type WorkerBundleReport = {
   ignoredAssets: number;
   /** How many findings of secrets the allow-list let through. */
   allowedSecrets: number;
+  /** What the check found. {@link checkWorkerBundle} throws when it finds any. */
   problems: WorkerBundleProblem[];
 };
 

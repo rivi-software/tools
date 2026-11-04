@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { describePattern, moduleMatcher, type ModulePattern } from "./modules.js";
 
 /** The shape of a kind of secret, by the name reports give it. */
-export type SecretPattern = { name: string; pattern: RegExp };
+export type SecretPattern = {
+  /** What reports call a value it matches: `Stripe secret key`. */
+  name: string;
+  /** What the value looks like. It must not match an empty string. */
+  pattern: RegExp;
+};
 
 /**
  * The key formats the check looks for. Each has a prefix or a structure of its own, so text that
