@@ -65,17 +65,22 @@ describe("readSourceMap", () => {
 
   it("reads the map the file names, inline or in a file, or else the one beside it", async () => {
     const dir = temporaryDirectory();
-    const inline = Buffer.from(JSON.stringify(map)).toString("base64");
+    const inline = (value: object) =>
+      `a();\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${Buffer.from(JSON.stringify(value)).toString("base64")}`;
+    // A real Worker's inline map runs to megabytes: far past the end of the file it starts at.
+    const long = inline({ ...map, sourcesContent: ["a();".repeat(5000)] });
+    expect(long.length).toBeGreaterThan(20_000);
     write(dir, {
       "src/a.ts": "",
       "dist/named.js": "a();\n//# sourceMappingURL=maps/named.js.map\n",
       "dist/maps/named.js.map": JSON.stringify({ ...map, sources: ["../../src/a.ts"] }),
-      "dist/inline.js": `a();\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${inline}`,
+      "dist/inline.js": inline(map),
+      "dist/long-inline.js": long,
       "dist/hidden.js": "a();",
       "dist/hidden.js.map": JSON.stringify(map),
       "dist/none.js": "a();",
     });
-    for (const name of ["named", "inline", "hidden"]) {
+    for (const name of ["named", "inline", "long-inline", "hidden"]) {
       const file = path.join(dir, "dist", `${name}.js`);
       const found = await readSourceMap(file, await readText(file), dir);
       expect(found?.modules, name).toEqual(["src/a.ts"]);

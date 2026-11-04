@@ -109,7 +109,9 @@ export async function readSourceMap(
   code: string,
   cwd: string,
 ): Promise<ResolvedSourceMap | undefined> {
-  const url = SOURCE_MAPPING_URL.exec(code.slice(-4096))?.[1];
+  // From the last comment, not the file's last few kB: an inline map can be megabytes long.
+  const at = code.lastIndexOf("sourceMappingURL=");
+  const url = at < 4 ? undefined : SOURCE_MAPPING_URL.exec(code.slice(at - 4))?.[1];
   let found: { file: string; text: string } | undefined;
   if (url?.startsWith("data:")) {
     const comma = url.indexOf(",");
