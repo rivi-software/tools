@@ -11,7 +11,8 @@ branding:
 # pushes. Give this job read access only.
 #
 # The findings are the review threads nobody has resolved, started by `reviewer` or by someone
-# with write access; Claude sees only the comments in them by those same people.
+# with write access; Claude sees only the comments in them by those same people. A request made in
+# a review thread (input thread) is about that thread: Claude does what it settles on.
 
 inputs:
   anthropic-api-key:
@@ -31,6 +32,10 @@ inputs:
     default: github-actions[bot]
   instructions:
     description: Instructions from whoever asked for the fix, which may narrow it or ask for something more.
+    required: false
+    default: ""
+  thread:
+    description: For a fix asked for in a review thread, the id of the review comment that starts it. The fix is what that thread asks.
     required: false
     default: ""
   model:
@@ -69,6 +74,7 @@ runs:
         PR_NUMBER: ${{ inputs.pull-request }}
         REVIEWER: ${{ inputs.reviewer }}
         INSTRUCTIONS: ${{ inputs.instructions }}
+        THREAD: ${{ inputs.thread }}
       run: |
         set -euo pipefail
         stop() {
@@ -122,8 +128,21 @@ runs:
         review=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --paginate |
           jq -rs --arg reviewer "$REVIEWER" '[.[][] | select(.user.login == $reviewer and .body != "")] | last | .body // ""')
         jq -n --argjson threads "$threads" --arg review "$review" '{threads: $threads, last_review: $review}' > "$dir/findings.json"
+
+        # The review thread the request came from: its place in the diff, and its comments by the
+        # same people as the findings'.
+        if [ -n "$THREAD" ]; then
+          start=$(gh api "repos/$GITHUB_REPOSITORY/pulls/comments/$THREAD")
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" --paginate |
+            jq -s --argjson start "$start" --arg reviewer "$REVIEWER" '
+              def trusted: .user.login == $reviewer or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"));
+              {path: $start.path, line: ($start.line // $start.original_line), outdated: ($start.line == null),
+               diff_hunk: $start.diff_hunk, url: $start.html_url,
+               comments: [.[][] | select((.id == $start.id or .in_reply_to_id == $start.id) and trusted) | {author: .user.login, body}]}' \
+            > "$dir/request-thread.json"
+        fi
         count=$(jq length <<< "$threads")
-        if [ "$count" = 0 ] && [ -z "$review" ] && [ -z "$INSTRUCTIONS" ]; then
+        if [ "$count" = 0 ] && [ -z "$review" ] && [ -z "$INSTRUCTIONS" ] && [ -z "$THREAD" ]; then
           stop "There are no open review findings on #$PR_NUMBER to fix."
         fi
         echo "Found $count open review threads on #$PR_NUMBER."
@@ -171,10 +190,11 @@ runs:
           --allowedTools "Read,Glob,Grep,Edit,Write,MultiEdit"
           --json-schema '{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title","summary"],"additionalProperties":false}'
         prompt: |
-          Fix the open review findings on pull request #${{ inputs.pull-request }} in ${{ github.repository }}: branch ${{ steps.pr.outputs.head_ref }} at ${{ steps.pr.outputs.head_sha }}, which is checked out here, shallow. The repository's guides (AGENTS.md, CONTRIBUTING.md and the READMEs, wherever they are) state its conventions. In ${{ steps.pr.outputs.dir }}:
+          ${{ inputs.thread != '' && 'Do what the review thread in request-thread.json asks' || 'Fix the open review findings' }} on pull request #${{ inputs.pull-request }} in ${{ github.repository }}: branch ${{ steps.pr.outputs.head_ref }} at ${{ steps.pr.outputs.head_sha }}, which is checked out here, shallow. The repository's guides (AGENTS.md, CONTRIBUTING.md and the READMEs, wherever they are) state its conventions. In ${{ steps.pr.outputs.dir }}:
           - findings.json: threads, the review threads nobody has resolved (the file, the line, outdated when the line has changed since, the url, and the comments, oldest first); and last_review, the body of the last review by ${{ inputs.reviewer }}, which may list findings that have no thread
           - pull-request.json: the title, description, commits and changed files
           - changes.diff: the pull request's changes
+          ${{ inputs.thread != '' && '- request-thread.json: the review thread the request came from: the file, the line, outdated when the line has changed since, the diff around it, the url, and the comments, oldest first. It is the finding to fix; the others only when the instructions ask for them.' || '' }}
           ${{ inputs.instructions != '' && format('Instructions from whoever asked for this fix, which may narrow it or ask for something more: {0}', inputs.instructions) || '' }}
 
           For each finding, read the code around it first. Fix it in the checkout with the smallest change that does what the thread settles on: a reply may have answered it, or asked for something else. Leave a finding alone when the thread says it is not a problem, when it is a decision for the author, or when you are not sure the fix is right. Change nothing else: no refactoring, reformatting or fixes nobody asked for. When a fix changes behaviour that a test covers, update the test. Do not edit .github/: a fix there is not pushed.

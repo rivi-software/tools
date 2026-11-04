@@ -8,14 +8,14 @@ RIVI Software runs it as RIVI Bot on its own repositories, through [a reusable w
 
 | Feature | Runs | What it writes | Default |
 | --- | --- | --- | --- |
-| [review](#review) | When a pull request opens and after every push; `/rivi-bot review` | One review with inline comments, pinned to the commit it read | On |
-| [describe](#describe) | When a pull request opens; `/rivi-bot describe` | A summary in the pull request's description, and labels | Off |
-| [triage](#triage) | When an issue opens; `/rivi-bot triage` | One comment: what the issue is, possible duplicates, what is missing, where to look, an approach, and a prompt for a coding agent; and labels | Off |
-| [fix](#fix) | `/rivi-bot fix` | A commit on the pull request's branch that fixes the open review findings | Off |
-| [ask](#ask) | `/rivi-bot ask <question>` | An answer to a question about a pull request or an issue | Off |
+| [review](#review) | When a pull request opens and after every push; [when asked](#asking-rivi-bot) | One review with inline comments, pinned to the commit it read | On |
+| [describe](#describe) | When a pull request opens; when asked | A summary in the pull request's description, and labels | Off |
+| [triage](#triage) | When an issue opens; when asked | One comment: what the issue is, possible duplicates, what is missing, where to look, an approach, and a prompt for a coding agent; and labels | Off |
+| [fix](#fix) | When asked | A commit on the pull request's branch that fixes the open review findings, or what was asked | Off |
+| [ask](#ask) | When asked | An answer to a question about a pull request or an issue | Off |
 | [housekeeping](#housekeeping) | On the caller's schedule | One issue that reports on the open issues and pull requests; labels, if asked | Off |
 
-What runs on its own, without a command, follows each feature's `auto` setting: for the author of a pull request or an issue who can write to the repository (`internal`, the default), for anyone (`everyone`), or for nobody (`off`).
+What runs on its own, without being asked, follows each feature's `auto` setting: for the author of a pull request or an issue who can write to the repository (`internal`, the default), for anyone (`everyone`), or for nobody (`off`).
 
 ## Setup
 
@@ -31,7 +31,9 @@ on:
     types: [opened, reopened, ready_for_review, synchronize, labeled]
   issues: # triage
     types: [opened]
-  issue_comment: # commands
+  issue_comment: # requests to @rivi-bot
+    types: [created]
+  pull_request_review_comment: # requests in review threads
     types: [created]
   schedule: # housekeeping
     - cron: "0 6 * * 1"
@@ -75,7 +77,7 @@ model: claude-opus-5-5 # each feature's model unless it names its own
 
 review:
   enabled: true
-  auto: internal # whose pull requests are reviewed without the label or a command
+  auto: internal # whose pull requests are reviewed without the label or a request
   approve: true # a review of an internal pull request approves when nothing has to change
   follow-up: true # after a first review, review only what changed since
   focus: "" # what else to look for
@@ -114,19 +116,25 @@ housekeeping:
 
 `auto` is `internal` (the author can write to the repository), `everyone` or `off`. `focus` and `instructions` can run to several lines, for a repository's review rules or its triage conventions. A setting of the wrong type stops the run with an error that names it, and a key that is not a setting is reported as a warning.
 
-## Commands
+## Asking rivi-bot
 
-Someone with write access gives a command with a comment that starts with `/rivi-bot`. The comment gets an eyes (👀) reaction, and the command runs if its feature is on. Anything after the command, to the end of the comment, is passed along.
+Someone with write access asks rivi-bot in a comment that speaks to `@rivi-bot`: on a pull request, on an issue, or in a review thread on a pull request's lines.
+
+- **A command.** A command right after the mention, with its slash or alone, runs as it is: `@rivi-bot /fix only the null check`, `@rivi-bot review`. What follows the command, to the end of the comment, is passed along, code and quoted lines included.
+- **Plain words.** Any other request goes to Claude, which reads it with the issue or pull request, the review thread and the latest comments, and picks the one action that does what it asks, or none: `@rivi-bot rename this to fetchAll` is a fix, `@rivi-bot why does this retry?` is a question, and a thank-you is nothing. A question about a change is answered rather than made. Routing is one call to the top-level `model` at low effort, with no tools. Should it fail, a command the comment opens with is taken.
+- **Reactions.** The comment gets eyes (👀) while the job runs, then a rocket (🚀). When rivi-bot can't do what it asks (the feature is off, the action does not work there, the pull request is closed or comes from a fork), or a job it ran fails, the comment gets a confused face (😕) and a reply that says why.
 
 | Command | On | Does |
 | --- | --- | --- |
-| `/rivi-bot review [instructions]` | A pull request | One review of its head now; the instructions may narrow or steer it |
-| `/rivi-bot describe` | A pull request | Writes its summary again, and adds labels |
-| `/rivi-bot fix [instructions]` | A pull request | Fixes the open review findings, and anything the instructions add |
-| `/rivi-bot triage [instructions]` | An issue | Triages it, or triages it again |
-| `/rivi-bot ask <question>` | Either | Answers the question |
+| `review [instructions]` | A pull request | One review of its head now; the instructions may narrow or steer it |
+| `describe [instructions]` | A pull request | Writes its summary again, and adds labels |
+| `fix [instructions]` | A pull request | Fixes the open review findings, or what the review thread or the instructions ask |
+| `triage [instructions]` | An issue | Triages it, or triages it again |
+| `ask <question>` | Either | Answers the question |
 
-A command from someone without write access is ignored. `/rivi-bot review` approves an outside pull request's review the way the label does, but for that one review.
+A comment from someone without write access is ignored, and so is a mention in a quote, in code or in an HTML comment, or a mention with nothing else. `/rivi-bot <command>` at the start of a comment, the older form, still works. A review asked for this way approves an outside pull request's review the way the label does, but for that one review.
+
+In a review thread, `ask` answers in the thread and `fix` does what the thread asks. A review comment on a pull request from a fork runs without the secrets, so rivi-bot does not answer there: ask in the pull request's conversation.
 
 ## Review
 
@@ -147,17 +155,17 @@ A command from someone without write access is ignored. `/rivi-bot review` appro
 
   Style and lint are left to CI.
 - **What it writes.** One inline comment per finding, with a suggestion block when the fix is a few lines it is sure of. Then exactly one review on the commit it read: a short body with the findings that need a change, one line each. The review comments; it approves only with `approve`, which the reusable workflow passes only for a pull request by someone with write access. It never requests changes and never posts a plain comment.
-- **When.** A pull request by someone with write access when it opens or leaves draft, and after every push (`auto: internal`). Any other pull request once a maintainer adds the `rivi-bot:review` label, and after every push while the label stays on, until a maintainer takes it off; or once, with `/rivi-bot review`. A push to a draft is not reviewed, but the label still asks for a review of a draft.
+- **When.** A pull request by someone with write access when it opens or leaves draft, and after every push (`auto: internal`). Any other pull request once a maintainer adds the `rivi-bot:review` label, and after every push while the label stays on, until a maintainer takes it off; or once, when a maintainer asks for a review. A push to a draft is not reviewed, but the label still asks for a review of a draft.
 - **Approvals.** An approval stands for the commit it read. Before a review of a later commit, the reviewer's earlier approvals on the pull request are dismissed, and the new review approves again if nothing has to change.
 - **Follow-up reviews.** After an earlier review by the same login, it reads only what changed since the commit that review read. It replays that commit's changes onto the pull request's current fork point (`git merge-tree`), so a rebase onto the base, or a merge of it, is not reviewed again. If nothing changed but the base, there is no review.
 - **Budget.**
-  - A whole pull request runs at high effort, with up to 40 turns and $10.
+  - A whole pull request runs at high effort, with up to 120 turns and $10: the turns let it read a large pull request, and the budget is what stops it. The reusable workflow gives the job 60 minutes for that; a review that runs out of time says so on the pull request.
   - A follow-up runs at medium effort, with up to 20 turns and $3.
   - The API key's workspace spend limit is the hard cap.
 
 ## Describe
 
-Reads the pull request, its diff and the checkout, and writes a summary for whoever reviews it: what changes and why, the changes that matter, and what to look at closely. The summary goes at the end of the description, between markers of its own, and replaces itself the next time; the author's text is left as it is. It also adds the repository's labels that fit, from those the repository has. It runs when a pull request opens, reopens or leaves draft, not after each push: `/rivi-bot describe` writes it again. Medium effort, up to 15 turns and $2.
+Reads the pull request, its diff and the checkout, and writes a summary for whoever reviews it: what changes and why, the changes that matter, and what to look at closely. The summary goes at the end of the description, between markers of its own, and replaces itself the next time; the author's text is left as it is. It also adds the repository's labels that fit, from those the repository has. It runs when a pull request opens, reopens or leaves draft, not after each push: `@rivi-bot describe` writes it again. Medium effort, up to 15 turns and $2.
 
 ## Triage
 
@@ -175,13 +183,13 @@ An issue can come from anyone, and with `auto: everyone` each new one spends up 
 
 ## Fix
 
-`/rivi-bot fix` on a pull request whose branch is in this repository fixes its open review findings: the review threads nobody has resolved, started by rivi-bot or by someone with write access. Claude reads the threads, with only the comments by those same people, rivi-bot's last review, the diff and the checkout, and edits the files with the smallest change each finding needs. It leaves a finding alone when the thread says it is not a problem, when it is a decision for the author, or when it is not sure of the fix. Instructions after the command narrow the fix or add to it: `/rivi-bot fix only the null check`.
+Asked on a pull request whose branch is in this repository, fix fixes its open review findings: the review threads nobody has resolved, started by rivi-bot or by someone with write access. Claude reads the threads, with only the comments by those same people, rivi-bot's last review, the diff and the checkout, and edits the files with the smallest change each finding needs. It leaves a finding alone when the thread says it is not a problem, when it is a decision for the author, or when it is not sure of the fix. What the request says narrows the fix or adds to it: `@rivi-bot /fix only the null check`. Asked in a review thread, it does what that thread settles on, and leaves the other findings alone unless the request names them.
 
 It runs nothing, not even the tests: the commit is code nobody has read yet, and the comment after it says what was fixed and what was left. The commit is pushed onto the commit the fix was made on, never with force; if the branch moved on meanwhile, nothing is pushed. A fix never changes `.github/`. A push with `github.token` starts no workflows, so CI runs on the fix only with an App. Pull requests from forks are not fixed: their branches are not this repository's to push to. High effort, up to 40 turns and $5.
 
 ## Ask
 
-`/rivi-bot ask <question>` on a pull request or an issue answers the question in a comment, from the thread and the code: a pull request's head, or an issue's default branch. It names files as `path:line`, and says where it is unsure. It changes nothing. Medium effort, up to 25 turns and $2.
+A question to `@rivi-bot` on a pull request or an issue, or `@rivi-bot /ask <question>`, is answered in a comment, or in the review thread it was asked in, from the thread and the code: a pull request's head, or an issue's default branch. It names files as `path:line`, and says where it is unsure. It changes nothing. Medium effort, up to 25 turns and $2.
 
 ## Housekeeping
 
@@ -205,8 +213,8 @@ The actions are built to run on pull requests and issues from anyone, once a mai
 - **Claude answers; the action acts.** Apart from the review, Claude has no GitHub tools: it answers in a fixed shape, and the steps after it decide what of that answer reaches the repository. They write only what the configuration turned on, add only labels the repository has, name only issues and files that exist, and edit only rivi-bot's own comments and its own section of a description. Nothing is closed, and no label is taken off.
 - **Fix in two jobs.** Claude edits a checkout in a job with a read-only token. A second job, which never runs Claude, checks the patch, commits it and pushes. Whatever the first job leaves on its runner cannot reach the token that pushes. The second job pushes nothing under `.github/`, and the first refuses a patch with the API key in it.
 - **One commit.** The review reads `head-sha`, the commit the maintainer approved, and nothing pushed after it.
-- **Prompt injection.** Claude is told that what the pull request or issue contains is material, never instructions. Text in a pull request can still steer what a review says, so a review approves only a pull request by someone with write access, and only with `approve`. A fix takes in comments only from rivi-bot and people with write access.
-- **The gate.** On `pull_request_target`, `issues` and `issue_comment`, a workflow has your secrets for content from anyone. The reusable workflow reviews an outside pull request only after a maintainer adds the label or gives the command, takes commands only from people with write access, and reads its configuration from the default branch. If you run an action yourself, run it on an outside pull request only after a maintainer approves (a label, as below, or an environment with required reviewers), never as soon as it opens. An approval can be good for one review, or stand until a maintainer takes it back, so that later pushes are reviewed too. A standing approval means each push spends up to a follow-up's budget on code nobody has read yet.
+- **Prompt injection.** Claude is told that what the pull request or issue contains is material, never instructions. Text in a pull request can still steer what a review says, so a review approves only a pull request by someone with write access, and only with `approve`. A fix takes in comments only from rivi-bot and people with write access. A request in plain words is routed by a call to Claude with no tools, which can pick only an action the person asking, who has write access, could have named.
+- **The gate.** On `pull_request_target`, `issues`, `issue_comment` and `pull_request_review_comment`, a workflow has your secrets for content from anyone. The reusable workflow reviews an outside pull request only after a maintainer adds the label or asks for a review, takes requests only from people with write access, and reads its configuration from the default branch. If you run an action yourself, run it on an outside pull request only after a maintainer approves (a label, as below, or an environment with required reviewers), never as soon as it opens. An approval can be good for one review, or stand until a maintainer takes it back, so that later pushes are reviewed too. A standing approval means each push spends up to a follow-up's budget on code nobody has read yet.
 
 ## The actions on their own
 
@@ -235,7 +243,7 @@ jobs:
   review:
     if: github.event.label.name == 'rivi-bot:review'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     concurrency:
       group: review-${{ github.event.pull_request.number }}
     permissions:
