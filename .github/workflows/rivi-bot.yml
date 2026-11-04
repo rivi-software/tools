@@ -212,7 +212,7 @@ jobs:
             | split("\n") | map(if test("\\A\\s*>") then blank else . end) | join("\n");
           def given($c):
             unhtml as $s
-            | [$s | spoken | match(at + "[ \\t]+/(?i:" + $c + ")(?![\\w-])[ \\t]*")] | first
+            | [$s | spoken | match(at + "[ \\t]*[,:]?[ \\t]*/(?i:" + $c + ")(?![\\w-])[ \\t]*")] | first
             | if . then $s[.offset + .length:] | strip else null end;
           def request($c):
             given($c) // (unhtml
