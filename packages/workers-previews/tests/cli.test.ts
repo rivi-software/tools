@@ -147,6 +147,16 @@ test("sweep --apply deletes the stale Previews and keeps the live ones", async (
   expect(names(fake)).toEqual(["main", previewName("feature/live")].sort());
 });
 
+test("sweep --apply keeps the pr-<number> Preview of a fork's open pull request", async () => {
+  const fake = world();
+  fake.state.workers.app.previews.push(preview("pr-4"));
+  fake.state.repositories["acme/app"].pulls.push(pull(4, "patch-1", "open", "someone/app"));
+  const { code, log } = await cli(["sweep", "--worker", "app", "--apply"], fake);
+  expect(code).toBe(0);
+  expect(log).toMatch(/keep\s+pr-4\s+#4\s+open pull request/);
+  expect(names(fake)).toContain("pr-4");
+});
+
 test("a sweep carries on past a failed delete, then exits non-zero", async () => {
   const fake = world({
     builds: {

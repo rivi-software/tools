@@ -194,7 +194,7 @@ The sweep reads the Worker's Previews from Cloudflare and the repository's branc
 
 A branch is stale once it is deleted, unless a pull request from it is still open, or when it is live and every pull request from it is closed. A live branch that never had a pull request keeps its Preview. The sweep deletes a stale branch's two Previews together, its hashed name and its raw name, as `delete` does.
 
-It reads every branch and every open pull request. It reads only the 1,000 most recently updated closed pull requests: one it misses only keeps a Preview longer. Pull requests from forks don't count, because their branches are not the repository's.
+It reads every branch and every open pull request. It reads only the 1,000 most recently updated closed pull requests: one it misses only keeps a Preview longer. A pull request from a fork counts only for its `pr-<number>` Preview, which it keeps while it is open. Its branch is not the repository's, so it keeps no other Preview, even one with the same branch name.
 
 ### When it refuses
 
@@ -225,6 +225,7 @@ const result = await sweepPreviews({
       number: request.iid,
       branch: request.source_branch,
       open: request.state === "opened",
+      fork: request.source_project_id !== request.target_project_id,
     })),
   }),
   apply: true,

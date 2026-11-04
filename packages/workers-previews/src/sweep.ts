@@ -1,7 +1,10 @@
 import { isPreviewName, previewName } from "./name.js";
 
-/** A pull request from a branch of the repository itself (a fork's do not count). */
-export type PullRequest = { number: number; branch: string; open: boolean };
+/**
+ * A pull request. `fork` marks one whose branch is in another repository: it counts only for its
+ * `pr-<number>` Preview, since its branch is not one of the repository's.
+ */
+export type PullRequest = { number: number; branch: string; open: boolean; fork?: boolean };
 
 /**
  * What the sweep compares the Previews with: every live branch, and the pull requests. Every open
@@ -16,7 +19,7 @@ export type PreviewOwner =
   | { kind: "production"; branch: string }
   /** A name `previewName` made; `branch` when a known branch or pull request hashes to it. */
   | { kind: "hashed"; branch?: string }
-  /** `pr-<number>`, the name Cloudflare's GitHub Actions example gives. */
+  /** `pr-<number>`, the name Cloudflare's GitHub Actions example gives; `branch` unless it is a fork's. */
   | { kind: "pull-request"; number: number; branch?: string }
   /** Any other name, taken as a branch name: `wrangler preview`'s default, and the Git integration's. */
   | { kind: "raw"; branch: string };
@@ -80,7 +83,7 @@ export function planSweep(
     );
   const keep = new Set(options.keep ?? []);
   const branchVerdict = (branch: string): Pick<SweepEntry, "action" | "reason"> => {
-    const own = repository.pullRequests.filter((pull) => pull.branch === branch);
+    const own = repository.pullRequests.filter((pull) => !pull.fork && pull.branch === branch);
     if (own.some((pull) => pull.open)) return { action: "keep", reason: "open pull request" };
     if (!live.has(branch)) return { action: "delete", reason: "branch deleted" };
     if (own.length === 0) return { action: "keep", reason: "branch has no pull request" };
@@ -139,7 +142,8 @@ function ownerOf(
   const pr = /^pr-([1-9][0-9]*)$/.exec(name);
   if (pr) {
     const number = Number(pr[1]);
-    const branch = repository.pullRequests.find((pull) => pull.number === number)?.branch;
+    const pull = repository.pullRequests.find((pull) => pull.number === number);
+    const branch = pull?.fork ? undefined : pull?.branch;
     return branch === undefined
       ? { kind: "pull-request", number }
       : { kind: "pull-request", number, branch };
@@ -155,11 +159,11 @@ function ownerOf(
 
 type BranchIndex = { known: Set<string>; hashed: Map<string, string> };
 
-/** Every branch the repository knows of (the live ones and the pull requests' heads), and each one's `previewName`. */
+/** Every branch the repository knows of (the live ones and its own pull requests' heads), and each one's `previewName`. */
 function branchIndex(repository: RepositoryState, production: string): BranchIndex {
   const known = new Set([
     ...repository.branches,
-    ...repository.pullRequests.map((pull) => pull.branch),
+    ...repository.pullRequests.filter((pull) => !pull.fork).map((pull) => pull.branch),
   ]);
   const hashed = new Map<string, string>();
   for (const branch of known)

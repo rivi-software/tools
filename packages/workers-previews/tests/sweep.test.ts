@@ -103,6 +103,35 @@ test("a Preview kept by name is never deleted, not even as its branch's other Pr
   expect(targets).toEqual([{ branch: "gone/branch" }]);
 });
 
+test("a fork's pull request keeps its pr-<number> Preview while open, and no other", () => {
+  const state: RepositoryState = {
+    branches: ["main", "wip"],
+    pullRequests: [
+      { number: 20, branch: "patch-1", open: true, fork: true },
+      { number: 21, branch: "patch-2", open: false, fork: true },
+      // A fork's branch named like one of the repository's own.
+      { number: 22, branch: "gone/branch", open: true, fork: true },
+      { number: 23, branch: "wip", open: false, fork: true },
+    ],
+  };
+  expect(previewOwner("pr-20", state)).toEqual({ kind: "pull-request", number: 20 });
+  const { entries } = planSweep(
+    ["pr-20", "pr-21", "pr-22", "gone/branch", previewName("patch-1"), "wip"],
+    state,
+  );
+  expect(
+    Object.fromEntries(entries.map((entry) => [entry.name, [entry.action, entry.reason]])),
+  ).toEqual({
+    "pr-20": ["keep", "open pull request"],
+    "pr-21": ["delete", "pull request closed"],
+    "pr-22": ["keep", "open pull request"],
+    "gone/branch": ["delete", "branch deleted"],
+    [previewName("patch-1")]: ["delete", "no live branch or pull request has this name"],
+    wip: ["keep", "branch has no pull request"],
+  });
+  expect(entries.find((entry) => entry.name === "pr-20")).not.toHaveProperty("branchExists");
+});
+
 test("the sweep refuses a branch list without the production branch", () => {
   expect(() => planSweep(["rt-1"], { branches: [], pullRequests: [] })).toThrow(
     "do not include the production branch main",

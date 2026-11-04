@@ -51,7 +51,7 @@ test("reads only the recently updated closed pull requests, which only keep a Pr
   );
 });
 
-test("leaves out the pull requests of forks, whose branches are not the repository's", async () => {
+test("marks the pull requests of forks, whose branches are not the repository's", async () => {
   const fake = setup({
     branches: ["main", "fix"],
     pulls: [
@@ -61,7 +61,11 @@ test("leaves out the pull requests of forks, whose branches are not the reposito
     ],
   });
   const state = await githubRepository({ repository: "acme/app", fetch: fake.fetch })();
-  expect(state.pullRequests).toEqual([{ number: 3, branch: "fix", open: true }]);
+  expect(state.pullRequests).toEqual([
+    { number: 3, branch: "fix", open: true },
+    { number: 1, branch: "fix", open: false, fork: true },
+    { number: 2, branch: "fix", open: false, fork: true },
+  ]);
 });
 
 test("a failed request fails the read, and a repository it cannot see says so", async () => {

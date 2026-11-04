@@ -27,8 +27,8 @@ const MAX_PAGES = 100;
  * Reads a GitHub repository's state for the sweep: every branch and every open pull request, and
  * the most recently updated closed ones. Throws, so the sweep deletes nothing, when GitHub fails
  * or the branches or open pull requests run past 100 pages. A missing closed pull request only
- * keeps a Preview, so those stop after `closedPages`. Pull requests from forks are left out: their
- * branches are not this repository's.
+ * keeps a Preview, so those stop after `closedPages`. A pull request from a fork, or from a
+ * deleted repository, comes with `fork: true`.
  */
 export function githubRepository(options: GitHubRepositoryOptions): () => Promise<RepositoryState> {
   if (!/^[\w.-]+\/[\w.-]+$/.test(options.repository))
@@ -67,10 +67,12 @@ export function githubRepository(options: GitHubRepositoryOptions): () => Promis
     return { items, complete: false };
   }
 
-  const pullRequest = (pull: Pull, open: boolean): PullRequest[] =>
-    pull.head.repo?.full_name.toLowerCase() === own
-      ? [{ number: pull.number, branch: pull.head.ref, open }]
-      : [];
+  const pullRequest = (pull: Pull, open: boolean): PullRequest => ({
+    number: pull.number,
+    branch: pull.head.ref,
+    open,
+    ...(pull.head.repo?.full_name.toLowerCase() === own ? {} : { fork: true }),
+  });
 
   return async () => {
     const repo = `/repos/${options.repository}`;
@@ -89,8 +91,8 @@ export function githubRepository(options: GitHubRepositoryOptions): () => Promis
     return {
       branches: branches.items.map((branch) => branch.name),
       pullRequests: [
-        ...open.items.flatMap((pull) => pullRequest(pull, true)),
-        ...closed.items.flatMap((pull) => pullRequest(pull, false)),
+        ...open.items.map((pull) => pullRequest(pull, true)),
+        ...closed.items.map((pull) => pullRequest(pull, false)),
       ],
     };
   };
