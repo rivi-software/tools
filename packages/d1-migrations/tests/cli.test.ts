@@ -2,7 +2,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { runCli, USAGE } from "../src/run-cli.js";
-import { project } from "./helpers.js";
+import { loadWrangler, project } from "./helpers.js";
+
+loadWrangler();
 
 async function run(cwd: string, args: string[]) {
   const log: string[] = [];

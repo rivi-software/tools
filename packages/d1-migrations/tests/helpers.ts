@@ -5,10 +5,22 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
-import { afterAll } from "vitest";
+import { afterAll, beforeAll } from "vitest";
 
 export const FIXTURES = path.join(import.meta.dirname, "fixtures");
 export const DATABASE_ID = "00000000-0000-4000-8000-000000000001";
+
+/**
+ * Loads Wrangler before the file's tests. The bundle splits migrations with Wrangler's splitter,
+ * and the first import of that large module takes a third of a second on a laptop and has passed
+ * five seconds on a busy CI runner. In a hook it gets a limit of its own, and the first test that
+ * splits a migration keeps the default limit for what it checks.
+ */
+export function loadWrangler(): void {
+  beforeAll(async () => {
+    await import("wrangler");
+  }, 60_000);
+}
 
 /** A directory removed after the test file's tests. */
 export function temporaryDirectory(): string {

@@ -3,7 +3,9 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { bundleD1Migrations, readD1Migrations } from "../src/bundle.js";
-import { FIXTURES, project, temporaryDirectory } from "./helpers.js";
+import { FIXTURES, loadWrangler, project, temporaryDirectory } from "./helpers.js";
+
+loadWrangler();
 
 describe("readD1Migrations", () => {
   // These pin what Wrangler's splitter gives for the cases a hand-written splitter gets wrong. When
