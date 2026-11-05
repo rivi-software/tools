@@ -1,0 +1,64 @@
+# The scope:* label of each path a pull request changes (.github/workflows/pr-labels.yml). The
+# scopes are the Conventional Commit scopes: a package's directory, rivi-bot, and repo for the rest.
+# Issues get theirs from Clef (scripts/label-issue.ts). A new package needs a scope:<directory>
+# label, with a description that says what the package does, and a line here.
+scope:cloudflare-deploy:
+  - changed-files:
+      - any-glob-to-any-file: packages/cloudflare-deploy/**
+scope:d1-migrations:
+  - changed-files:
+      - any-glob-to-any-file: packages/d1-migrations/**
+scope:deploy-watch:
+  - changed-files:
+      - any-glob-to-any-file: packages/deploy-watch/**
+scope:posthog-tanstack-start:
+  - changed-files:
+      - any-glob-to-any-file: packages/posthog-tanstack-start/**
+scope:semgrep-github-report:
+  - changed-files:
+      - any-glob-to-any-file: packages/semgrep-github-report/**
+scope:vite-plugin-zod-jitless:
+  - changed-files:
+      - any-glob-to-any-file: packages/vite-plugin-zod-jitless/**
+scope:workers-bundle-check:
+  - changed-files:
+      - any-glob-to-any-file: packages/workers-bundle-check/**
+scope:workers-coordination:
+  - changed-files:
+      - any-glob-to-any-file: packages/workers-coordination/**
+scope:workers-mail:
+  - changed-files:
+      - any-glob-to-any-file: packages/workers-mail/**
+scope:workers-previews:
+  - changed-files:
+      - any-glob-to-any-file: packages/workers-previews/**
+scope:rivi-bot:
+  - changed-files:
+      - any-glob-to-any-file:
+          - rivi-bot/**
+          - .github/workflows/rivi-bot.yml
+          - .github/workflows/review.yml
+# Each option matches on its own. all-globs-to-any-file needs one file that matches every glob, so
+# a `!` glob there leaves out files: rivi-bot's workflows, which are scope:rivi-bot, and the
+# lockfile, which a package's dependency change also touches. Not .changeset/ either: a package's
+# pull request adds its changeset there.
+scope:repo:
+  - changed-files:
+      - all-globs-to-any-file:
+          - .github/**
+          - "!.github/workflows/rivi-bot.yml"
+          - "!.github/workflows/review.yml"
+      - all-globs-to-any-file:
+          - "*.yaml"
+          - "!pnpm-lock.yaml"
+      - any-glob-to-any-file:
+          - scripts/**
+          - assets/**
+          - "*.md"
+          - "*.json"
+          - .changeset/config.json
+          - .editorconfig
+          - .gitignore
+          - .node-version
+          - .oxfmtrc.json
+          - .oxlintrc.json

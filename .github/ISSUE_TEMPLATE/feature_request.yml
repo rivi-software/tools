@@ -1,6 +1,6 @@
 name: Feature request
 description: A new feature, or a change to what a package does
-labels: [enhancement]
+type: Feature
 body:
   - type: input
     id: package

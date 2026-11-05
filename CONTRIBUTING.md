@@ -13,6 +13,20 @@ Everyone who takes part follows the [code of conduct](CODE_OF_CONDUCT.md).
 - **A question.** Open an issue too: a question often shows where a README falls short.
 - **A vulnerability.** Never in a public issue: [SECURITY.md](SECURITY.md) says how to report one privately.
 
+### Labels
+
+Each issue has a type, and issues and pull requests have labels in a few families. Most are set for you: a pull request gets its scope from the paths it changes, and a new issue gets its type, scope and topics from [Clef](#labels-from-clef).
+
+| Family | Values | Meaning |
+| --- | --- | --- |
+| Type | Bug, Feature, Task | The issue type, not a label. Bug: something does not do what its README says. Feature: new behaviour, or a change users notice. Task: a chore, refactor, docs, CI or tooling change users do not notice |
+| Scope | `scope:<package>`, `scope:rivi-bot`, `scope:repo` | Where the change lands: a package by its directory, the same scope as in a Conventional Commits title. `scope:repo` is CI, releases, scripts and repository-wide docs |
+| Topic | `security`, `performance`, `documentation`, `accessibility`, `question`, `breaking-change` | What else it is about. `breaking-change` needs a breaking release, and only a maintainer adds it |
+| Triage | `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `duplicate`, `wontfix` | Where an issue stands. `needs-triage` waits for a maintainer, `needs-info` for its author; `ready-for-agent` is specified well enough for a coding agent, `ready-for-human` needs a person |
+| Contributors | `good first issue`, `help wanted` | Ready for someone outside the team to take |
+
+The `bug` and `enhancement` labels remain on older issues only: the types replace them.
+
 ## Your pull request
 
 A typo, a broken link, a clearer sentence, or a bug fix with a test can go straight to a pull request. Anything bigger starts with an issue: a new feature, a change to what a package does or exports, a new dependency, or a new package. Wait for a maintainer to agree on the approach there before you write it.
@@ -68,7 +82,7 @@ You may use AI tools to write an issue or a pull request, and you are its author
 
 A new package starts with an issue, like any change bigger than a fix.
 
-Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app. Start the README with the badge row the other packages have, under its title, and end it with their License section and RIVI Software sign-off, with the package's name in the badges' addresses. Add the package to the table of packages in the root README.
+Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app. Start the README with the badge row the other packages have, under its title, and end it with their License section and RIVI Software sign-off, with the package's name in the badges' addresses. Add the package to the table of packages in the root README. A maintainer creates its `scope:<name>` label, with a description of what the package does, and the pull request maps it to the package's directory in [`.github/labeler.yml`](.github/labeler.yml).
 
 ```text
 packages/<name>/
@@ -139,7 +153,7 @@ A relative import names the file the build emits, `./util.js` for `src/util.ts`:
 ### Pull requests from forks
 
 - **CI runs.** Read the diff before you approve a CI run for a first-time contributor. CI runs the pull request's own code: its install, tests, build and scripts. It gets a read-only token and no secrets, but nothing should run that nobody has read. Look hardest at `.github/`, `scripts/`, the `scripts` in a `package.json` and `pnpm-workspace.yaml`.
-- **Secrets.** No workflow runs a fork's code with secrets. A workflow on `pull_request_target` has them, so it must not check out the pull request and run it; [rivi-bot's](.github/workflows/rivi-bot.yml) never runs the code it checks out.
+- **Secrets.** No workflow runs a fork's code with secrets. A workflow on `pull_request_target` has them, so it must not check out the pull request and run it; [rivi-bot's](.github/workflows/rivi-bot.yml) never runs the code it checks out, and [the labeler](.github/workflows/pr-labels.yml) checks out nothing.
 - **Small fixes.** When a pull request lacks only a changeset or a Conventional Commits title, push the changeset to the branch or edit the title yourself. Don't send the contributor round again.
 
 ### Reviews by rivi-bot
@@ -151,6 +165,17 @@ Any other pull request waits for a maintainer, who asks for reviews by adding th
 A review after the first reads only what changed since the last one. A push to a draft is not reviewed, but the label still asks for a review of a draft. Either way the review is advice: a maintainer still approves and merges.
 
 The workflow ([`.github/workflows/review.yml`](.github/workflows/review.yml)) calls the reusable one in [`.github/workflows/rivi-bot.yml`](.github/workflows/rivi-bot.yml), and needs the `ANTHROPIC_REVIEW_API_KEY` secret. With the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret of an App installed here, the reviews come from that App rather than `github-actions`. Other repositories call `rivi-bot.yml` at `main`, so a change to it or to an action in `rivi-bot/` reaches them as soon as it merges.
+
+### Labels from Clef
+
+Two workflows add [the labels](#labels), as the App above, and neither takes a label off:
+
+- **Pull requests.** [`pr-labels.yml`](.github/workflows/pr-labels.yml) adds the `scope:*` label of each path a pull request changes, as [`.github/labeler.yml`](.github/labeler.yml) maps them, when it opens and after each push.
+- **Issues.** [`issue-labels.yml`](.github/workflows/issue-labels.yml) runs [`scripts/label-issue.ts`](scripts/label-issue.ts) when an issue opens. It asks [Clef](https://developers.cloudflare.com/workers-ai/models/clef/), Cloudflare's decision model on Workers AI, about what the issue lacks: its type and its scope, each as a choice between the options; each topic label but `breaking-change`, as a yes or no; and the organization's Priority and Effort fields, as a level on a rubric. Clef returns a probability for every option. A type under 60% or a scope under 50% is left for a maintainer, and a topic is added only at 80% or more; the job summary lists each answer with its probability. An issue from outside the team also gets `needs-triage` when it opens. A label, type or field value someone set stays, including one set while Clef answered, and a label someone took off is never added again.
+
+The options for the scope and the topics are the repository's labels, and Clef decides between them by their descriptions: keep a label's description to what its package does, and a new package needs only its label (and its line in `labeler.yml`). The thresholds, rubrics and types are in [`scripts/issue-labels.ts`](scripts/issue-labels.ts).
+
+The issue labeler is off until the `RIVI_BOT_AI_ENABLED` variable is `true`. It needs the `CLOUDFLARE_ACCOUNT_ID` variable and the `CLOUDFLARE_AI_API_TOKEN` secret, a Cloudflare API token with Workers AI Read; and the `CLOUDFLARE_AI_GATEWAY_TOKEN` secret, with AI Gateway Run, unless the first token has that too. Clef's calls go through the authenticated AI Gateway `github-rivi-tools`, which logs them (an issue is public anyway), with a spend limit of $5 a month; a call costs well under a cent. To label an issue that opened before, or again, run the workflow by hand with its number; a run by hand adds no `needs-triage`.
 
 ### Changes and releases
 

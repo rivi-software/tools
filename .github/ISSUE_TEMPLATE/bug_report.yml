@@ -1,6 +1,6 @@
 name: Bug report
 description: A package or rivi-bot does not do what its README says
-labels: [bug]
+type: Bug
 body:
   - type: markdown
     attributes:
