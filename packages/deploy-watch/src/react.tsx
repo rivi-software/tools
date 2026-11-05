@@ -1,9 +1,11 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   BUILD_META_NAME,
+  dismissNewBuildNotice,
   isChunkLoadError,
   isModuleChanged,
   isNewBuildLive,
+  isNewBuildNoticeDismissed,
   isReloadingOntoNewBuild,
   isWatching,
   learnPageBuild,
@@ -36,18 +38,23 @@ export type NewBuildNoticeOptions = {
 
 /**
  * The new-version notice's state: `show` once a newer build is live (with `module`, once it
- * changes that module), until `dismiss`. `reload` loads the page again on the new build; a page
- * with unsaved work asks first, as it does for any reload. Dismissed, the tab still moves onto the
- * new build at its next move to another page.
+ * changes that module), until `dismiss`. A dismissal holds in every notice of the tab, including
+ * one that mounts later, until a later build has other browser code (with `module`, changes that
+ * module again). `reload` loads the page again on the new build; a page with unsaved work asks
+ * first, as it does for any reload. Dismissed, the tab still moves onto the new build at its next
+ * move to another page.
  */
 export function useNewBuildNotice({ module }: NewBuildNoticeOptions = {}): {
   show: boolean;
   dismiss: () => void;
   reload: () => void;
 } {
-  const live = useSyncExternalStore(
+  const show = useSyncExternalStore(
     subscribeToNewBuild,
-    () => (module === undefined ? isNewBuildLive() : module !== null && isModuleChanged(module)),
+    () =>
+      module !== null &&
+      (module === undefined ? isNewBuildLive() : isModuleChanged(module)) &&
+      !isNewBuildNoticeDismissed(module),
     () => false,
   );
   const scoped = module !== undefined;
@@ -56,10 +63,11 @@ export function useNewBuildNotice({ module }: NewBuildNoticeOptions = {}): {
   useEffect(() => {
     if (scoped) learnPageBuild();
   }, [scoped]);
-  const [dismissed, setDismissed] = useState(false);
   return {
-    show: live && !dismissed,
-    dismiss: () => setDismissed(true),
+    show,
+    dismiss: () => {
+      if (module !== null) dismissNewBuildNotice(module);
+    },
     reload: () => reloadOntoNewBuild(),
   };
 }

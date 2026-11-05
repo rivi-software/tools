@@ -61,6 +61,23 @@ test("a tab that stayed at the unsaved-work prompt reloads again after the next 
   expect(tab.isReloadingOntoNewBuild()).toBe(false);
 });
 
+test("a dismissal is the tab's, so a notice that mounts again stays hidden", async () => {
+  const tab = await startTab();
+  let told = 0;
+  tab.subscribeToNewBuild(() => told++);
+  expect(tab.isNewBuildNoticeDismissed()).toBe(false);
+  tab.dismissNewBuildNotice();
+  expect(told).toBe(1);
+  expect(tab.isNewBuildNoticeDismissed()).toBe(true);
+  // A notice for a module has its own; this tab cannot compare modules, so it takes each as changed.
+  expect(tab.isModuleChanged("inbox")).toBe(true);
+  expect(tab.isNewBuildNoticeDismissed("inbox")).toBe(false);
+  tab.dismissNewBuildNotice("inbox");
+  expect(tab.isNewBuildNoticeDismissed("inbox")).toBe(true);
+  // Dismissed, the tab still moves onto the new build.
+  expect(tab.isNewBuildLive()).toBe(true);
+});
+
 test("a page the back/forward cache brings back can reload again", async () => {
   const tab = await startTab();
   let told = 0;

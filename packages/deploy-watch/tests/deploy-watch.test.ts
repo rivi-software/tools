@@ -276,6 +276,81 @@ test("a tab that cannot compare a module takes it as changed", async () => {
   expect(older.watch.changes("inbox")).toBe(true);
 });
 
+test("a dismissed notice stays hidden until a later build brings other browser code", async () => {
+  const { watch, state, advance } = tab({ live: { id: "a", client: "c1" } });
+  let told = 0;
+  watch.subscribe(() => told++);
+  // Nothing to dismiss before a newer build is live.
+  watch.dismiss();
+  expect(watch.isDismissed()).toBe(false);
+  watch.learnOwnBuild();
+  await watch.check({ force: true });
+  state.live = { id: "b", client: "c2" };
+  advance(CHECK_SPACING_MS);
+  await watch.check();
+  expect(told).toBe(2);
+  // Every notice reads the dismissal, and hears of it.
+  watch.dismiss();
+  watch.dismiss();
+  expect(watch.isDismissed()).toBe(true);
+  expect(told).toBe(3);
+  // The tab still moves onto the build at its next move.
+  expect(watch.isNew()).toBe(true);
+  // A deploy that changed only the server since the dismissal.
+  state.live = { id: "c", client: "c2" };
+  advance(CHECK_SPACING_MS);
+  await watch.check();
+  expect(watch.isDismissed()).toBe(true);
+  // One that changed the browser code again.
+  state.live = { id: "d", client: "c3" };
+  advance(CHECK_SPACING_MS);
+  await watch.check();
+  expect(watch.isDismissed()).toBe(false);
+  // Without fingerprints, any later build shows it again.
+  const bare = tab({ live: "b" });
+  await bare.watch.check({ force: true });
+  bare.watch.dismiss();
+  bare.state.live = "c";
+  bare.advance(CHECK_SPACING_MS);
+  await bare.watch.check();
+  expect(bare.watch.isDismissed()).toBe(false);
+});
+
+test("a notice dismissed for a module shows again once a later build changes that module again", async () => {
+  const { watch, state, advance } = tab({
+    live: { id: "a", client: "c1", modules: { inbox: "i1", kb: "k1" } },
+  });
+  await watch.check({ force: true });
+  state.live = { id: "b", client: "c2", modules: { inbox: "i2", kb: "k1" } };
+  advance(CHECK_SPACING_MS);
+  await watch.check();
+  watch.dismiss("inbox");
+  expect(watch.isDismissed("inbox")).toBe(true);
+  // Each module's notice, and the one for every newer build, has a dismissal of its own.
+  expect(watch.isDismissed("kb")).toBe(false);
+  expect(watch.isDismissed()).toBe(false);
+  // A later deploy that changes another module.
+  state.live = { id: "c", client: "c3", modules: { inbox: "i2", kb: "k2" } };
+  advance(CHECK_SPACING_MS);
+  await watch.check();
+  expect(watch.changes("inbox")).toBe(true);
+  expect(watch.isDismissed("inbox")).toBe(true);
+  // One that changes the module again.
+  state.live = { id: "d", client: "c4", modules: { inbox: "i3", kb: "k2" } };
+  advance(CHECK_SPACING_MS);
+  await watch.check();
+  expect(watch.isDismissed("inbox")).toBe(false);
+  // A tab that cannot compare the module takes any later build as changing it again.
+  const unaware = tab({ live: "b" });
+  await unaware.watch.check({ force: true });
+  unaware.watch.dismiss("inbox");
+  expect(unaware.watch.isDismissed("inbox")).toBe(true);
+  unaware.state.live = "c";
+  unaware.advance(CHECK_SPACING_MS);
+  await unaware.watch.check();
+  expect(unaware.watch.isDismissed("inbox")).toBe(false);
+});
+
 test("a chunk that failed while the live build has the page's browser code reloads once", async () => {
   const chunk = new TypeError("Failed to fetch dynamically imported module: /assets/x.js");
   const { watch, state, loads, storage } = tab({ live: { id: "a", client: "c1" } });

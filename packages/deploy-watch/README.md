@@ -84,7 +84,7 @@ deployWatch({
 // Or by the file that loads a section's screens: ({ importers }) => sectionsLoadedBy(importers)
 ```
 
-Then give the notice the module the page shows: `useNewBuildNotice({ module: "inbox" })`. It shows once a deploy changed that module's code, and also while the tab cannot tell (below). `{ module: null }` is a page in no module, where it never shows. A deploy that changed other code still reaches the tab at its next move.
+Then give the notice the module the page shows: `useNewBuildNotice({ module: "inbox" })`. It shows once a deploy changed that module's code, and also while the tab cannot tell (below). `{ module: null }` is a page in no module, where it never shows. A deploy that changed other code still reaches the tab at its next move. Dismissed, the notice shows again once a later deploy changes the module again.
 
 ## How it works
 
@@ -111,6 +111,7 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
 - **The move.** Once the build is new:
   - `followNewBuild(router)` makes the router's next move to another path a whole-page load. It runs on `onBeforeNavigate`, after the router's blockers let the move through, and flushes the history's queued address change before it reloads, so the destination loads with one history entry. A move within the page (its search or hash) stays in place.
   - `useNewBuildNotice()` gives a notice its state: `show`, `dismiss` and `reload`. A reload on a page with unsaved work asks first, through the page's own `beforeunload`; if the user stays, the next click asks again. With `{ module }`, `show` waits until the new build changes that module (`isModuleChanged`).
+  - `dismiss` hides the notice for the live build, and the tab remembers it, so every notice reads it, one that mounts again included (`dismissNewBuildNotice`). The notice shows again once a later build is live with other browser code than the one dismissed, or with `{ module }`, once a later build changes that module again. Each module's notice, and the one without a module, is dismissed on its own. Where the files have no fingerprints to compare, any later build shows it again.
   - `useChunkErrorRecovery(error)` (React) or `recoverFromChunkError(error)` lets an error screen that caught a missing chunk reload onto the new build instead of showing. While it checks, and while the page reloads, the screen renders a placeholder. If the user stays at the unsaved-work prompt instead, `useChunkErrorRecovery` shows the error at their next key or pointer press; a screen of your own learns of it from `subscribeToReload`.
   - A chunk can also fail while the page's build, or one with its browser code, is still the live one. The file is on the server, so the browser failed to fetch it (a dropped connection), and Chromium keeps that failure for the document's life ([whatwg/html#6768](https://github.com/whatwg/html/issues/6768)). The page then reloads onto the same build, once per build in a tab. A second failure is a real fault, and the screen shows it. So does a failure while `/build.json` does not answer (offline, where a reload would leave the app) or while the tab has no session storage.
   - A failed hover or idle preload only starts the check. The page never reloads under someone reading or typing.
@@ -176,9 +177,10 @@ From `@rivi-software/deploy-watch` (browser and server; on the server, and in a 
 | `followNewBuild(router)` | Makes the router's next move to another path a whole-page load once the build is new; returns the unsubscribe |
 | `recoverFromChunkError(error)` | Resolves `true` when `error` is a missing chunk and the page is reloading, `false` when the error screen should show |
 | `isChunkLoadError(error)` | Whether `error` is a chunk of script or style that did not load |
-| `isNewBuildLive()`, `subscribeToNewBuild(listener)` | Whether a newer build with other browser code is live; a listener for the moment it is, and for what the tab learns after (returns the unsubscribe) |
+| `isNewBuildLive()`, `subscribeToNewBuild(listener)` | Whether a newer build with other browser code is live; a listener for the moment it is, for what the tab learns after, and for a dismissed notice (returns the unsubscribe) |
 | `isModuleChanged(module)` | Whether a newer build is live and changes `module`, or the tab cannot tell |
 | `learnPageBuild()` | Reads `build.json` once, unless a check already has, so `isModuleChanged` can compare later deploys with the page's own build |
+| `dismissNewBuildNotice(module?)`, `isNewBuildNoticeDismissed(module?)` | Hides the notice for `module`, or the one without a module, in every notice of the tab until a later build has other code; whether it is hidden for the live build. `subscribeToNewBuild` listeners hear of a dismissal |
 | `reloadOntoNewBuild(href?)` | Loads `href`, or this page again, on the live build |
 | `isReloadingOntoNewBuild()`, `subscribeToReload(listener)` | Whether a reload is under way, so errors until the page is gone can go unreported; a listener for when that changes (returns the unsubscribe) |
 | `isWatching()` | Whether the watch runs: a deployed build, in the browser |
@@ -195,7 +197,7 @@ From `@rivi-software/deploy-watch/react` (server and browser):
 | Export | What |
 | --- | --- |
 | `BuildMeta` | The `<meta>` with the page's build id, for the document's `<head>` |
-| `useNewBuildNotice({ module? })` | `{ show, dismiss, reload }` for a new-version notice; with `module`, it shows only once a deploy changed that module |
+| `useNewBuildNotice({ module? })` | `{ show, dismiss, reload }` for a new-version notice; with `module`, it shows only once a deploy changed that module. A dismissal holds in every notice until a later build |
 | `useChunkErrorRecovery(error)` | `true` while an error screen should render a placeholder instead of the error |
 | Types | `NewBuildNoticeOptions` |
 
@@ -210,7 +212,7 @@ From `@rivi-software/deploy-watch/vite` (Vite config):
 
 ## Development
 
-The tests in `tests/` cover the watch over injected dependencies: the spacing between checks, the shared request, the loop guard, the reload and a reload that does not happen, chunk recovery, the router's moves, the page's own build and module changes. They also cover the watch started in a stand-in browser tab, the Vite plugin's hooks, a real server build against the package as npm installs it, and real browser builds whose fingerprints change only with the code each module brings. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+The tests in `tests/` cover the watch over injected dependencies: the spacing between checks, the shared request, the loop guard, the reload and a reload that does not happen, chunk recovery, the router's moves, the page's own build, module changes and the notice's dismissal. They also cover the watch started in a stand-in browser tab, the Vite plugin's hooks, a real server build against the package as npm installs it, and real browser builds whose fingerprints change only with the code each module brings. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
 
 ## License
 
