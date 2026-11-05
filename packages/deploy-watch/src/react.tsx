@@ -76,22 +76,35 @@ export function useNewBuildNotice({ module }: NewBuildNoticeOptions = {}): {
  * For an error screen: true while a missing chunk is checked against the live build, and while the
  * page reloads onto a newer one (render a placeholder, not the error); false once the error is the
  * screen's to show, which includes a reload the user stayed through at the unsaved-work prompt.
- * The server render and any other error read false from the start.
+ * The server render and any other error read false from the start. A screen that stays mounted
+ * and renders again with another error checks that error afresh.
  */
 export function useChunkErrorRecovery(error: unknown): boolean {
-  const [state, setState] = useState<"checking" | "reloading" | "shown">(() =>
-    isWatching() && isChunkLoadError(error) ? "checking" : "shown",
-  );
+  const [recovery, setRecovery] = useState(() => startRecovery(error));
+  // The state belongs to one error. Another error starts over, and React renders again at once,
+  // before the screen shows anything (its pattern for storing information from previous renders).
+  let current = recovery;
+  if (!Object.is(recovery.error, error)) {
+    current = startRecovery(error);
+    setRecovery(current);
+  }
+  const { state } = current;
   const reloading = useSyncExternalStore(subscribeToReload, isReloadingOntoNewBuild, () => false);
   useEffect(() => {
     if (state !== "checking") return;
-    let mounted = true;
+    let active = true;
     void recoverFromChunkError(error).then((reloads) => {
-      if (mounted) setState(reloads ? "reloading" : "shown");
+      if (active) setRecovery({ error, state: reloads ? "reloading" : "shown" });
     });
     return () => {
-      mounted = false;
+      active = false;
     };
   }, [state, error]);
   return state === "checking" || (state === "reloading" && reloading);
+}
+
+type ChunkErrorRecovery = { error: unknown; state: "checking" | "reloading" | "shown" };
+
+function startRecovery(error: unknown): ChunkErrorRecovery {
+  return { error, state: isWatching() && isChunkLoadError(error) ? "checking" : "shown" };
 }
