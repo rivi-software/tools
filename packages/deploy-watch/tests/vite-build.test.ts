@@ -85,9 +85,14 @@ test("a browser build under another base reads build.json there, and never holds
   const code = files.map((file) => ("code" in file ? file.code : "")).join("\n");
   expect(code).toContain("/app/build.json");
   expect(code).not.toContain("abc123");
-  const asset = files.find((file) => file.fileName === "build.json");
-  const file = JSON.parse(asset && "source" in asset ? String(asset.source) : "{}");
+  const read = (name: string) => {
+    const asset = files.find((file) => file.fileName === name);
+    return JSON.parse(asset && "source" in asset ? String(asset.source) : "{}");
+  };
+  const file = read("build.json");
   expect(file).toEqual({ id: "abc123", client: expect.stringMatching(/^[0-9a-f]{16}$/) });
+  // The build's own copy, which a tab on it reads once a deploy replaced `build.json`.
+  expect(read("assets/deploy-watch-abc123.json")).toEqual(file);
 });
 
 test("a production build in CI that finds no id warns once, across its environments", async () => {
@@ -202,8 +207,10 @@ test("each named module's fingerprint changes only with the code it adds to the 
     ]),
   );
   expect(Object.keys(before.modules ?? {})).toEqual(["inbox", "kb"]);
-  // Another build of the same code has the same fingerprints.
+  // Another build of the same code has the same fingerprints, from another commit too: the copy
+  // under the build's own name is in no fingerprint.
   expect(await buildApp()).toEqual(before);
+  expect(await buildApp({}, [], "def456")).toEqual({ ...before, id: "def456" });
 
   // The inbox's lazily loaded dialog belongs to the inbox.
   const dialog = await buildApp({ "modules/inbox-dialog.js": 'export const text = "Reply";' });

@@ -18,21 +18,38 @@ function memoryStorage(entries: Record<string, string> = {}) {
   };
 }
 
+type Answer = string | BuildFile | null | Error;
+
 /**
- * A tab on build `a`, whose `/build.json` answers `live` (a bare id is a file with only the id)
- * and whose clock the test moves.
+ * A tab on build `a`, whose `/build.json` answers `live` (a bare id is a file with only the id),
+ * whose build's own copy answers `own` (left out, the tab has none to read), and whose clock the
+ * test moves.
  */
-function tab({ live = "a" as string | BuildFile | null | Error, storage = memoryStorage() } = {}) {
+function tab({
+  live = "a" as Answer,
+  own = undefined as Answer | undefined,
+  storage = memoryStorage(),
+} = {}) {
   let time = 1_000_000;
   const loads: (string | undefined)[] = [];
-  const state = { live, fetches: 0 };
+  const state = { live, fetches: 0, ownFetches: 0 };
+  const answer = async (value: Answer) => {
+    if (value instanceof Error) throw value;
+    return typeof value === "string" ? { id: value } : value;
+  };
   const watch = createDeployWatch({
     current: "a",
     fetchLive: async () => {
       state.fetches++;
-      if (state.live instanceof Error) throw state.live;
-      return typeof state.live === "string" ? { id: state.live } : state.live;
+      return answer(state.live);
     },
+    fetchOwn:
+      own === undefined
+        ? undefined
+        : async () => {
+            state.ownFetches++;
+            return answer(own);
+          },
     now: () => time,
     storage,
     load: (href) => void loads.push(href),
@@ -76,7 +93,7 @@ test("a different live build is new, tells the listeners once, and is not fetche
 });
 
 test("checks at the same time share one request", async () => {
-  const { watch, state } = tab({ live: "b" });
+  const { watch, state } = tab({ live: "b", own: "a" });
   const results = await Promise.all([
     watch.check({ force: true }),
     watch.check({ force: true }),
@@ -84,6 +101,7 @@ test("checks at the same time share one request", async () => {
   ]);
   expect(results).toEqual([true, true, true]);
   expect(state.fetches).toBe(1);
+  expect(state.ownFetches).toBe(1);
 });
 
 test("a failed or unreadable answer leaves the tab where it is", async () => {
@@ -235,6 +253,51 @@ test("the page's own build is read once, unless a check already read the file", 
   await checked.watch.check({ force: true });
   checked.watch.learnOwnBuild();
   expect(checked.state.fetches).toBe(1);
+});
+
+test("a tab that missed its own build's file reads its build's copy after a deploy", async () => {
+  const own = { id: "a", client: "c1", modules: { inbox: "i1", kb: "k1" } };
+  // A deploy that changed only the server came before the tab's first read of `/build.json`.
+  const { watch, state, advance } = tab({ live: { ...own, id: "b" }, own });
+  let told = 0;
+  watch.subscribe(() => told++);
+  expect(await watch.check({ force: true })).toBe(false);
+  expect(state.ownFetches).toBe(1);
+  // The tab learned something: `isModuleChanged` can now tell.
+  expect(told).toBe(1);
+  // A later deploy that changed one module.
+  state.live = { id: "c", client: "c2", modules: { inbox: "i1", kb: "k2" } };
+  advance(CHECK_SPACING_MS);
+  expect(await watch.check()).toBe(true);
+  expect(watch.changes("inbox")).toBe(false);
+  expect(watch.changes("kb")).toBe(true);
+  expect(state.ownFetches).toBe(1);
+});
+
+test("a tab reads its build's copy only when the live file names another build", async () => {
+  // The live file still named the page's build.
+  const early = tab({ live: { id: "a", client: "c1" }, own: { id: "a", client: "c1" } });
+  await early.watch.check({ force: true });
+  early.state.live = { id: "b", client: "c1" };
+  early.advance(CHECK_SPACING_MS);
+  expect(await early.watch.check()).toBe(false);
+  // An answer that is not a build file says nothing about a deploy.
+  const unanswered = tab({ live: null, own: { id: "a", client: "c1" } });
+  await unanswered.watch.check({ force: true });
+  expect(early.state.ownFetches + unanswered.state.ownFetches).toBe(0);
+});
+
+test("a tab whose build's copy is gone takes another build as new, and asks once", async () => {
+  for (const own of [null, new Error("offline"), { id: "b", client: "c1" }]) {
+    // Gone (a host that keeps no replaced assets), unanswered, or another build's file.
+    const { watch, state, advance } = tab({ live: { id: "b", client: "c1" }, own });
+    expect(await watch.check({ force: true })).toBe(true);
+    expect(watch.changes("inbox")).toBe(true);
+    state.live = { id: "c", client: "c1" };
+    advance(CHECK_SPACING_MS);
+    await watch.check();
+    expect(state).toMatchObject({ fetches: 2, ownFetches: 1 });
+  }
 });
 
 test("a module changes only when the newer build's fingerprint for it differs", async () => {
