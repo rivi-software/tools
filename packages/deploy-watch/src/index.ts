@@ -9,8 +9,9 @@
  *   once a minute), every ten minutes while it is visible, and at once when a chunk fails to load.
  * - Once a newer build is live, the next move to another page loads the whole page
  *   (`followNewBuild`), after the app's unsaved-work guards have run; a notice can offer the
- *   reload (`useNewBuildNotice` in `./react`); and an error screen that caught a missing chunk
- *   reloads onto the new build instead of showing (`recoverFromChunkError`).
+ *   reload (`useNewBuildNotice` in `./react`), and once dismissed waits for a later build; and an
+ *   error screen that caught a missing chunk reloads onto the new build instead of showing
+ *   (`recoverFromChunkError`).
  * - `/build.json` also carries the browser code's fingerprint and each named module's. A deploy
  *   that leaves the page's browser code as it was is not new to the tab, and a notice for a
  *   module waits until a deploy changes that module (`isModuleChanged`).
@@ -99,6 +100,9 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
   let answeredOwnCode = false;
   let pending: Promise<boolean> | null = null;
   let reloading = false;
+  // The live build each notice was dismissed for, by the module it shows (`undefined` for the
+  // notice for every newer build). Every notice in the tab reads it.
+  const dismissed = new Map<string | undefined, BuildFile>();
   const listeners = new Set<() => void>();
   const reloadListeners = new Set<() => void>();
 
@@ -109,6 +113,17 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
    */
   function sameCode(build: BuildFile): boolean {
     return build.id === current || (!!own?.client && build.client === own.client);
+  }
+
+  /**
+   * Whether `later` has other code than `earlier`: `module`'s, where both files fingerprint their
+   * modules, or else the browser code's. Without a fingerprint to compare, any other build does.
+   */
+  function differs(earlier: BuildFile, later: BuildFile, module?: string): boolean {
+    if (later.id === earlier.id) return false;
+    if (module !== undefined && earlier.modules && later.modules)
+      return earlier.modules[module] !== later.modules[module];
+    return !earlier.client || later.client !== earlier.client;
   }
 
   /**
@@ -180,9 +195,21 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
      * module neither build names has no code of its own, and never changes.
      */
     changes(module: string): boolean {
-      if (!live) return false;
-      if (!own?.modules || !live.modules) return true;
-      return own.modules[module] !== live.modules[module];
+      return live !== null && (!own || differs(own, live, module));
+    },
+    /**
+     * Hides the notice for `module`, or the one for every newer build without it, until a later
+     * build has other code: that module's, or else other browser code. Every notice hears of it.
+     */
+    dismiss(module?: string) {
+      if (!live || dismissed.get(module) === live) return;
+      dismissed.set(module, live);
+      for (const listener of listeners) listener();
+    },
+    /** Whether the notice for `module`, or for every newer build, was dismissed for the live code. */
+    isDismissed(module?: string): boolean {
+      const build = dismissed.get(module);
+      return !!live && !!build && !differs(build, live, module);
     },
     /**
      * Reads `/build.json` once, unless a check already has. Soon after the page loads it still
@@ -418,8 +445,26 @@ export function learnPageBuild(): void {
 }
 
 /**
- * Calls `listener` once a newer build is live, and again when the tab learns more: a later
- * deploy, or its own build's file, either of which can change `isModuleChanged`.
+ * Hides the new-version notice, in every notice of the tab, for the live build: until a later
+ * build changes `module` again, or without `module`, until a later build has other browser code.
+ * `useNewBuildNotice`'s `dismiss` calls it. The tab still moves onto the new build at its next move.
+ */
+export function dismissNewBuildNotice(module?: string): void {
+  watch?.dismiss(module);
+}
+
+/**
+ * Whether the new-version notice for `module`, or the one for every newer build without it, was
+ * dismissed for the live build's code (`dismissNewBuildNotice`).
+ */
+export function isNewBuildNoticeDismissed(module?: string): boolean {
+  return watch?.isDismissed(module) ?? false;
+}
+
+/**
+ * Calls `listener` once a newer build is live, and again when the tab learns more (a later
+ * deploy, or its own build's file, either of which can change `isModuleChanged`) and when a
+ * notice is dismissed.
  */
 export function subscribeToNewBuild(listener: () => void): () => void {
   return watch?.subscribe(listener) ?? (() => {});
