@@ -185,6 +185,19 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
     load(href);
   }
 
+  /**
+   * For `router`'s `onBeforeNavigate`: once a newer build is live, a move to another page loads
+   * the whole page. The event fires once the router's blockers let the move through, with the
+   * address change still queued in its history: flushed, the address is the destination, and
+   * reloading lands there with one history entry. A move within the page (its search or hash) and
+   * the first load stay as they are.
+   */
+  function beforeNavigate(router: NavigationEvents, event: NavigationEvent) {
+    if (!event.fromLocation || !event.pathChanged || !live) return;
+    router.history.flush?.();
+    reload();
+  }
+
   return {
     check,
     reload,
@@ -262,19 +275,10 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
       load();
       return true;
     },
-    /**
-     * The router's next move to another page loads the whole page once a newer build is live.
-     * `onBeforeNavigate` fires once the router's blockers let the move through, with the address
-     * change still queued in its history: flushed, the address is the destination, and reloading
-     * lands there with one history entry. A move within the page (its search or hash) and the
-     * first load stay as they are.
-     */
+    beforeNavigate,
+    /** The router's next move to another page loads the whole page once a newer build is live. */
     follow(router: NavigationEvents) {
-      return router.subscribe("onBeforeNavigate", (event) => {
-        if (!event.fromLocation || !event.pathChanged || !live) return;
-        router.history.flush?.();
-        reload();
-      });
+      return router.subscribe("onBeforeNavigate", (event) => beforeNavigate(router, event));
     },
   };
 }
@@ -503,7 +507,12 @@ export function recoverFromChunkError(error: unknown): Promise<boolean> {
   return watch?.recover(error) ?? Promise.resolve(false);
 }
 
-/** Makes the router's next move to another page a whole-page load once a newer build is live. */
+/**
+ * Makes the router's next move to another page a whole-page load once a newer build is live. In
+ * the browser it follows the router whether the watch starts before or after (`startDeployWatch`):
+ * each move asks the watch that runs then. Nothing happens on the server.
+ */
 export function followNewBuild(router: NavigationEvents): () => void {
-  return watch?.follow(router) ?? (() => {});
+  if (typeof window === "undefined") return () => {};
+  return router.subscribe("onBeforeNavigate", (event) => watch?.beforeNavigate(router, event));
 }

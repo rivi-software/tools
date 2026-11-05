@@ -38,10 +38,13 @@ import {
 } from "@rivi-software/deploy-watch";
 import { BuildMeta, useChunkErrorRecovery, useNewBuildNotice } from "@rivi-software/deploy-watch/react";
 
-// The browser entry, before the app renders, and the router (TanStack Router).
+// The browser entry, before the app renders.
 startDeployWatch();
+
+// Where the router is made (TanStack Router; `getRouter` in TanStack Start), before or after the
+// watch starts. On the server it does nothing.
 const router = createRouter({ routeTree });
-if (typeof window !== "undefined") followNewBuild(router);
+followNewBuild(router);
 
 // The root document.
 <head>
@@ -109,7 +112,7 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
   Once the live build has other browser code than the page's, it is new, and it stays new for the tab; later checks keep reading `build.json`, since a later deploy may change another module. An answer that is not a build file, such as a sign-in page in its place, changes nothing, so serve `build.json` to visitors who are not signed in.
 - **The page's own build.** The page knows only its build's id. The first answer that names that id is its own `build.json`, and once the tab has it, a build with the same `client` is not new. A notice for a module (`useNewBuildNotice({ module })`) reads the file once right away (`learnPageBuild`), while it most likely still names the page's own build. A tab that never read it, because a deploy came first, takes any other id as new and every module as changed, as if no fingerprints were there.
 - **The move.** Once the build is new:
-  - `followNewBuild(router)` makes the router's next move to another path a whole-page load. It runs on `onBeforeNavigate`, after the router's blockers let the move through, and flushes the history's queued address change before it reloads, so the destination loads with one history entry. A move within the page (its search or hash) stays in place.
+  - `followNewBuild(router)` makes the router's next move to another path a whole-page load. It runs on `onBeforeNavigate`, after the router's blockers let the move through, and flushes the history's queued address change before it reloads, so the destination loads with one history entry. A move within the page (its search or hash) stays in place. It follows the router whether `startDeployWatch()` runs before or after it, since each move asks the watch that runs then; on the server it does nothing.
   - `useNewBuildNotice()` gives a notice its state: `show`, `dismiss` and `reload`. A reload on a page with unsaved work asks first, through the page's own `beforeunload`; if the user stays, the next click asks again. With `{ module }`, `show` waits until the new build changes that module (`isModuleChanged`).
   - `dismiss` hides the notice for the live build, and the tab remembers it, so every notice reads it, one that mounts again included (`dismissNewBuildNotice`). The notice shows again once a later build is live with other browser code than the one dismissed, or with `{ module }`, once a later build changes that module again. Each module's notice, and the one without a module, is dismissed on its own. Where the files have no fingerprints to compare, any later build shows it again.
   - `useChunkErrorRecovery(error)` (React) or `recoverFromChunkError(error)` lets an error screen that caught a missing chunk reload onto the new build instead of showing. While it checks, and while the page reloads, the screen renders a placeholder. `useChunkErrorRecovery` checks each error the screen renders, also when the screen stays mounted from one error to the next. If the user stays at the unsaved-work prompt instead, `useChunkErrorRecovery` shows the error at their next key or pointer press; a screen of your own learns of it from `subscribeToReload`.
@@ -174,7 +177,7 @@ From `@rivi-software/deploy-watch` (browser and server; on the server, and in a 
 | Export | What |
 | --- | --- |
 | `startDeployWatch({ buildFile? })` | Starts the tab's watch; call it in the browser before the app renders |
-| `followNewBuild(router)` | Makes the router's next move to another path a whole-page load once the build is new; returns the unsubscribe |
+| `followNewBuild(router)` | Makes the router's next move to another path a whole-page load once the build is new, whether the watch starts before or after it; returns the unsubscribe |
 | `recoverFromChunkError(error)` | Resolves `true` when `error` is a missing chunk and the page is reloading, `false` when the error screen should show |
 | `isChunkLoadError(error)` | Whether `error` is a chunk of script or style that did not load |
 | `isNewBuildLive()`, `subscribeToNewBuild(listener)` | Whether a newer build with other browser code is live; a listener for the moment it is, for what the tab learns after, and for a dismissed notice (returns the unsubscribe) |
@@ -212,7 +215,7 @@ From `@rivi-software/deploy-watch/vite` (Vite config):
 
 ## Development
 
-The tests in `tests/` cover the watch over injected dependencies: the spacing between checks, the shared request, the loop guard, the reload and a reload that does not happen, chunk recovery, the router's moves, the page's own build, module changes and the notice's dismissal. They also cover the watch started in a stand-in browser tab, an error screen's check for each error it renders (in happy-dom), the Vite plugin's hooks, a real server build against the package as npm installs it, and real browser builds whose fingerprints change only with the code each module brings. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+The tests in `tests/` cover the watch over injected dependencies: the spacing between checks, the shared request, the loop guard, the reload and a reload that does not happen, chunk recovery, the router's moves, the page's own build, module changes and the notice's dismissal. They also cover the watch started in a stand-in browser tab, with a router followed before or after it starts, an error screen's check for each error it renders (in happy-dom), the Vite plugin's hooks, a real server build against the package as npm installs it, and real browser builds whose fingerprints change only with the code each module brings. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
 
 ## License
 

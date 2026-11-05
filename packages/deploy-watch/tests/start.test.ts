@@ -1,14 +1,15 @@
 import { afterEach, expect, test, vi } from "vitest";
+import type { NavigationEvent } from "../src/index.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 /**
- * Starts the watch in a stand-in for a browser tab on build `a`, whose `/build.json` names build
- * `b`, and waits until the tab knows `b` is live.
+ * A stand-in for a browser tab on build `a`, whose `/build.json` names build `b`, with the package
+ * loaded fresh and the watch not started yet.
  */
-async function startTab() {
+async function openTab() {
   const loads: (string | undefined)[] = [];
   const stored = new Map<string, string>();
   const tabWindow = Object.assign(new EventTarget(), {
@@ -32,15 +33,41 @@ async function startTab() {
   // A fresh module: the watch starts once per page.
   vi.resetModules();
   const deployWatch = await import("../src/index.js");
-  deployWatch.startDeployWatch();
-  // A chunk that failed to load checks at once.
-  tabWindow.dispatchEvent(new Event("vite:preloadError"));
-  await vi.waitFor(() => expect(deployWatch.isNewBuildLive()).toBe(true));
   return {
     ...deployWatch,
     loads,
     dispatch: (type: string, fields: Record<string, unknown> = {}) =>
       tabWindow.dispatchEvent(Object.assign(new Event(type), fields)),
+    /** Starts the watch and waits until the tab knows `b` is live. */
+    async start() {
+      deployWatch.startDeployWatch();
+      // A chunk that failed to load checks at once.
+      tabWindow.dispatchEvent(new Event("vite:preloadError"));
+      await vi.waitFor(() => expect(deployWatch.isNewBuildLive()).toBe(true));
+    },
+  };
+}
+
+/** The tab with its watch started, once it knows `b` is live. */
+async function startTab() {
+  const tab = await openTab();
+  await tab.start();
+  return tab;
+}
+
+/** A stand-in for TanStack Router: `move` fires its `onBeforeNavigate` listeners. */
+function router() {
+  const listeners = new Set<(event: NavigationEvent) => void>();
+  return {
+    subscribe: (_type: "onBeforeNavigate", listener: (event: NavigationEvent) => void) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    history: {},
+    listeners,
+    move: (event: NavigationEvent) => {
+      for (const listener of listeners) listener(event);
+    },
   };
 }
 
@@ -91,4 +118,35 @@ test("a page the back/forward cache brings back can reload again", async () => {
   tab.reloadOntoNewBuild("/inbox");
   expect(tab.loads).toEqual(["/inbox", "/inbox"]);
   expect(told).toBe(3);
+});
+
+test("the router follows the new build whether it is followed before or after the watch starts", async () => {
+  for (const order of ["router first", "watch first"]) {
+    const tab = await openTab();
+    const routes = router();
+    if (order === "watch first") await tab.start();
+    tab.followNewBuild(routes);
+    if (order === "router first") await tab.start();
+    routes.move({ fromLocation: {}, pathChanged: true });
+    expect({ order, loads: tab.loads }).toEqual({ order, loads: [undefined] });
+  }
+});
+
+test("a router followed where no watch ever starts stays as it is", async () => {
+  const tab = await openTab();
+  const routes = router();
+  const stop = tab.followNewBuild(routes);
+  routes.move({ fromLocation: {}, pathChanged: true });
+  expect(tab.loads).toEqual([]);
+  stop();
+  expect(routes.listeners.size).toBe(0);
+});
+
+test("on the server, following a router subscribes nothing", async () => {
+  vi.resetModules();
+  const { followNewBuild } = await import("../src/index.js");
+  const routes = router();
+  const stop = followNewBuild(routes);
+  expect(routes.listeners.size).toBe(0);
+  stop();
 });
