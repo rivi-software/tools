@@ -1,7 +1,9 @@
 /**
  * Labels the issue `ISSUE_NUMBER` with Clef through the AI Gateway (.github/workflows/issue-labels.yml):
  * its type, a `scope:*` label, topic labels, and the organization's Priority and Effort fields, each
- * only while the issue lacks it. scripts/issue-labels.ts says what is asked and what is added.
+ * only while the issue lacks it, and never a label someone took off. `needs-triage` is added only
+ * when the issue opens (GITHUB_EVENT_NAME `issues`), not on a run by hand. scripts/issue-labels.ts
+ * says what is asked and what is added.
  *
  * Needs GITHUB_TOKEN (issues: write), GITHUB_REPOSITORY, ISSUE_NUMBER, CLOUDFLARE_ACCOUNT_ID and
  * CLOUDFLARE_AI_API_TOKEN (Workers AI Read); CLOUDFLARE_AI_GATEWAY_TOKEN when the gateway takes a
@@ -9,8 +11,8 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { askClef, planChanges, questionsFor, stateFor } from "./issue-labels.ts";
-import type { Issue, Label } from "./issue-labels.ts";
+import { askClef, planChanges, questionsFor, removedLabels, stateFor } from "./issue-labels.ts";
+import type { Issue, IssueEvent, Label } from "./issue-labels.ts";
 
 const env = process.env;
 
@@ -35,6 +37,19 @@ async function github<T>(method: string, path: string, body?: object): Promise<T
   return (await response.json()) as T;
 }
 
+/** Every event on the issue, a page of a hundred at a time. */
+async function issueEvents(number: number): Promise<IssueEvent[]> {
+  const events: IssueEvent[] = [];
+  for (let page = 1; ; page += 1) {
+    const batch = await github<IssueEvent[]>(
+      "GET",
+      `/issues/${number}/events?per_page=100&page=${page}`,
+    );
+    events.push(...batch);
+    if (batch.length < 100) return events;
+  }
+}
+
 /** What it did, and what it left for a maintainer: a line each. */
 async function labelIssue(number: number): Promise<string[]> {
   const issue = await github<Issue>("GET", `/issues/${number}`);
@@ -46,9 +61,12 @@ async function labelIssue(number: number): Promise<string[]> {
 
   const answers = await askClef(env, stateFor(issue), questions);
 
-  // Read the issue again after Clef answers, so what someone set in the meantime stays.
+  // Read the issue again after Clef answers, so what someone set or took off in the meantime stays.
   const current = await github<Issue>("GET", `/issues/${number}`);
-  const plan = planChanges(current, labels, questions, answers);
+  const plan = planChanges(current, labels, questions, answers, {
+    opened: env.GITHUB_EVENT_NAME === "issues",
+    removed: removedLabels(await issueEvents(number)),
+  });
   const done = [...plan.notes];
 
   if (plan.labels.length) {

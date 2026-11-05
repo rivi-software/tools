@@ -7,6 +7,7 @@ import {
   levelOf,
   planChanges,
   questionsFor,
+  removedLabels,
   stateFor,
   type Answer,
   type Issue,
@@ -163,9 +164,12 @@ describe("checkAnswers", () => {
   });
 });
 
+/** A new issue, as the `issues: opened` event runs on it. */
+const opened = { opened: true, removed: new Set<string>() };
+
 describe("planChanges", () => {
   it("takes the answers that clear their thresholds", () => {
-    const plan = planChanges(issue(), labels, questionsFor(issue(), labels), answers);
+    const plan = planChanges(issue(), labels, questionsFor(issue(), labels), answers, opened);
     expect(plan.type).toBe("Bug");
     expect(plan.labels).toEqual(["scope:deploy-watch"]);
     expect(plan.fields).toEqual([
@@ -189,7 +193,7 @@ describe("planChanges", () => {
         probabilities: { "scope:deploy-watch": 0.4, "scope:workers-mail": 0.1, "scope:repo": 0.49 },
       },
     };
-    const plan = planChanges(issue(), labels, questionsFor(issue(), labels), unsure);
+    const plan = planChanges(issue(), labels, questionsFor(issue(), labels), unsure, opened);
     expect(plan.type).toBeNull();
     expect(plan.labels).toEqual([]);
     expect(plan.notes).toContain("type: Feature at 46%, under 60%: left for a maintainer");
@@ -197,24 +201,54 @@ describe("planChanges", () => {
   });
 
   it("adds a topic only when Clef is sure of it", () => {
-    const plan = planChanges(issue(), labels, questionsFor(issue(), labels), {
-      ...answers,
-      "topic.security": { type: "noul", noul: 0.85 },
-      "topic.documentation": { type: "noul", noul: 0.6 },
-    });
+    const plan = planChanges(
+      issue(),
+      labels,
+      questionsFor(issue(), labels),
+      {
+        ...answers,
+        "topic.security": { type: "noul", noul: 0.85 },
+        "topic.documentation": { type: "noul", noul: 0.6 },
+      },
+      opened,
+    );
     expect(plan.labels).toEqual(["scope:deploy-watch", "security"]);
   });
 
-  it("adds needs-triage for an author outside the team", () => {
+  it("adds needs-triage for an author outside the team, when the issue opens", () => {
     const outside = issue({ author_association: "NONE" });
-    const plan = planChanges(outside, labels, questionsFor(outside, labels), answers);
+    const plan = planChanges(outside, labels, questionsFor(outside, labels), answers, opened);
     expect(plan.labels).toEqual(["scope:deploy-watch", "needs-triage"]);
+  });
+
+  it("adds no needs-triage on a run by hand", () => {
+    const outside = issue({ author_association: "NONE" });
+    const plan = planChanges(outside, labels, questionsFor(outside, labels), answers, {
+      opened: false,
+      removed: new Set(),
+    });
+    expect(plan.labels).toEqual(["scope:deploy-watch"]);
+  });
+
+  it("never adds again a label someone took off, and says so", () => {
+    const outside = issue({ author_association: "NONE" });
+    const plan = planChanges(
+      outside,
+      labels,
+      questionsFor(outside, labels),
+      { ...answers, "topic.security": { type: "noul", noul: 0.9 } },
+      { opened: true, removed: new Set(["security", "needs-triage", "scope:deploy-watch"]) },
+    );
+    expect(plan.labels).toEqual([]);
+    expect(plan.notes).toContain("security: taken off before, so not added again");
+    expect(plan.notes).toContain("needs-triage: taken off before, so not added again");
+    expect(plan.notes).toContain("scope:deploy-watch: taken off before, so not added again");
   });
 
   it("adds only labels the repository has", () => {
     const bare = labels.filter((label) => label.name !== "needs-triage");
     const outside = issue({ author_association: "NONE" });
-    const plan = planChanges(outside, bare, questionsFor(outside, bare), answers);
+    const plan = planChanges(outside, bare, questionsFor(outside, bare), answers, opened);
     expect(plan.labels).toEqual(["scope:deploy-watch"]);
   });
 
@@ -225,7 +259,7 @@ describe("planChanges", () => {
       labels: ["scope:repo"],
       issue_field_values: [{ issue_field_id: EFFORT.id }],
     });
-    const plan = planChanges(meanwhile, labels, questions, answers);
+    const plan = planChanges(meanwhile, labels, questions, answers, opened);
     expect(plan.type).toBeNull();
     expect(plan.labels).toEqual([]);
     expect(plan.fields).toEqual([{ field: PRIORITY, value: "High" }]);
@@ -233,9 +267,23 @@ describe("planChanges", () => {
 
   it("acts only on questions it asked", () => {
     const typed = issue({ type: { name: "Task" } });
-    const plan = planChanges(typed, labels, questionsFor(typed, labels), answers);
+    const plan = planChanges(typed, labels, questionsFor(typed, labels), answers, opened);
     expect(plan.type).toBeNull();
     expect(plan.notes.some((note) => note.startsWith("type:"))).toBe(false);
+  });
+});
+
+describe("removedLabels", () => {
+  it("names each label an unlabeled event took off, and nothing else", () => {
+    const removed = removedLabels([
+      { event: "labeled", label: { name: "security" } },
+      { event: "unlabeled", label: { name: "security" } },
+      { event: "labeled", label: { name: "security" } },
+      { event: "unlabeled", label: { name: "needs-triage" } },
+      { event: "renamed" },
+      { event: "unlabeled", label: null },
+    ]);
+    expect([...removed]).toEqual(["security", "needs-triage"]);
   });
 });
 

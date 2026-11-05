@@ -38,16 +38,24 @@ scope:rivi-bot:
           - rivi-bot/**
           - .github/workflows/rivi-bot.yml
           - .github/workflows/review.yml
-# Not .changeset/: a package's pull request adds its changeset there.
+# Each option matches on its own. all-globs-to-any-file needs one file that matches every glob, so
+# a `!` glob there leaves out files: rivi-bot's workflows, which are scope:rivi-bot, and the
+# lockfile, which a package's dependency change also touches. Not .changeset/ either: a package's
+# pull request adds its changeset there.
 scope:repo:
   - changed-files:
-      - any-glob-to-any-file:
+      - all-globs-to-any-file:
           - .github/**
+          - "!.github/workflows/rivi-bot.yml"
+          - "!.github/workflows/review.yml"
+      - all-globs-to-any-file:
+          - "*.yaml"
+          - "!pnpm-lock.yaml"
+      - any-glob-to-any-file:
           - scripts/**
           - assets/**
           - "*.md"
           - "*.json"
-          - "*.yaml"
           - .changeset/config.json
           - .editorconfig
           - .gitignore

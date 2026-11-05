@@ -10,7 +10,8 @@
  *
  * An answer can only be one of the options asked for, and one below its threshold is left for a
  * maintainer. Only what the issue lacks is asked and added: a label, type or field value someone
- * set stays, and nothing is taken off. An issue from outside the team also gets `needs-triage`.
+ * set stays, nothing is taken off, and a label someone took off is never added again. An issue
+ * from outside the team also gets `needs-triage` when it opens.
  * The candidates are the repository's labels with their descriptions, so a new package needs only
  * a new `scope:*` label.
  */
@@ -46,6 +47,12 @@ export type Answer =
 
 /** One of the organization's single-select issue fields, with its options lowest first. */
 export type IssueField = { id: number; name: string; levels: string[] };
+
+/** One of an issue's timeline events, as GitHub's REST API lists them. */
+export type IssueEvent = { event: string; label?: { name: string } | null };
+
+/** Where the run stands: whether the issue just opened, and the labels someone took off it. */
+export type Context = { opened: boolean; removed: ReadonlySet<string> };
 
 /** What to change on the issue, and a line for each answer that was asked. */
 export type Plan = {
@@ -224,17 +231,28 @@ function percent(probability: number): string {
   return `${Math.round(probability * 100)}%`;
 }
 
+/** The labels someone took off the issue, from its events: a run never adds them again. */
+export function removedLabels(events: IssueEvent[]): Set<string> {
+  return new Set(
+    events.flatMap((event) =>
+      event.event === "unlabeled" && event.label ? [event.label.name] : [],
+    ),
+  );
+}
+
 /**
  * What to change: the labels and the type whose answer clears its threshold, a level for each
- * field, and `needs-triage` for an author outside the team. Only labels the repository has, and
- * nothing the issue has by now: `issue` is read again after Clef answers, so a type, scope or
- * field value someone set in the meantime stays.
+ * field, and `needs-triage` for an author outside the team when the issue just opened, not on a
+ * later run by hand. Only labels the repository has, none someone took off, and nothing the issue
+ * has by now: `issue` is read again after Clef answers, so a type, scope or field value someone
+ * set in the meantime stays.
  */
 export function planChanges(
   issue: Issue,
   repoLabels: Label[],
   questions: Record<string, Question>,
   answers: Record<string, Answer>,
+  context: Context,
 ): Plan {
   const exists = new Set(repoLabels.map((label) => label.name));
   const has = new Set(issue.labels.map(labelName));
@@ -276,9 +294,15 @@ export function planChanges(
     plan.notes.push(`${id}: ${value} (score ${answer.score.toFixed(2)})`);
   }
 
-  if (!TEAM.has(issue.author_association ?? "")) plan.labels.push("needs-triage");
+  if (context.opened && !TEAM.has(issue.author_association ?? "")) {
+    plan.labels.push("needs-triage");
+  }
 
-  plan.labels = [...new Set(plan.labels)].filter((name) => exists.has(name) && !has.has(name));
+  const add = [...new Set(plan.labels)].filter((name) => exists.has(name) && !has.has(name));
+  for (const name of add.filter((name) => context.removed.has(name))) {
+    plan.notes.push(`${name}: taken off before, so not added again`);
+  }
+  plan.labels = add.filter((name) => !context.removed.has(name));
   return plan;
 }
 

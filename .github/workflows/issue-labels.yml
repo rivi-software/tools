@@ -3,8 +3,9 @@ name: Issue labels
 # On each new issue, as RIVI Bot, Clef picks what the issue lacks: its type, a scope:* label,
 # topic labels, and the organization's Priority and Effort fields (scripts/label-issue.ts). An
 # answer Clef is unsure of is left for a maintainer, and an issue from outside the team also gets
-# needs-triage. It only adds: a label, type or field value someone set stays. Run it by hand to
-# label an issue again, or one that opened before this ran.
+# needs-triage when it opens. It only adds: a label, type or field value someone set stays, and a
+# label someone took off is never added again. Run it by hand to label an issue again, or one that
+# opened before this ran; a run by hand adds no needs-triage.
 #
 # Off until the repository variable RIVI_BOT_AI_ENABLED is "true", which needs the variable
 # CLOUDFLARE_ACCOUNT_ID and the secret CLOUDFLARE_AI_API_TOKEN (Workers AI Read), and
