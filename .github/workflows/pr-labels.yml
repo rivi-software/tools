@@ -1,0 +1,34 @@
+name: PR labels
+
+# Labels each pull request with the scope:* of the paths it changes (.github/labeler.yml), as
+# RIVI Bot. pull_request_target runs main's workflow and configuration, so a pull request from a
+# fork is labeled too, and nothing here checks out or runs the pull request's code: the labeler
+# only reads the list of changed files. It only adds labels; a maintainer's stay.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: pr-labels-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Label by changed paths
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          repo-token: ${{ steps.app-token.outputs.token }}
+          sync-labels: false
