@@ -1,5 +1,6 @@
 import type { PullRequest, RepositoryState } from "./sweep.js";
 
+/** The repository `githubRepository` reads, and how it reaches GitHub. */
 export type GitHubRepositoryOptions = {
   /** `owner/name`. */
   repository: string;

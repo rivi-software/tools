@@ -10,7 +10,9 @@ import {
 } from "@rivi-software/cloudflare-deploy";
 import { previewName } from "./name.js";
 
+/** What `deployPreview` deploys, and how it runs Wrangler. */
 export type DeployPreviewOptions = {
+  /** The branch the Preview is for; its `previewName` names the Preview. */
   branch: string;
   /** The branch production deploys from, which gets no Preview. Default `main`. */
   productionBranch?: string;

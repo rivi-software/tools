@@ -24,6 +24,7 @@ export type PreviewOwner =
   /** Any other name, taken as a branch name: `wrangler preview`'s default, and the Git integration's. */
   | { kind: "raw"; branch: string };
 
+/** The options of `planSweep`. */
 export type SweepOptions = {
   /** The branch production deploys from. Default `main`. */
   productionBranch?: string;
