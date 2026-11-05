@@ -1,5 +1,11 @@
 # @rivi-software/deploy-watch
 
+## 0.4.1
+
+### Patch Changes
+
+- 221c833: `useChunkErrorRecovery(error)` checks each error an error screen renders. Before, it decided on the first render only, so a screen that stayed mounted while its error changed kept that first answer: a chunk error after another kind of error showed instead of reloading the page, and so did a chunk error after one whose check had shown the screen. Now another error starts the check over, and a check still running for an earlier error no longer decides for the new one.
+
 ## 0.4.0
 
 ### Minor Changes
