@@ -15,7 +15,10 @@ export type LazyFile = {
 };
 
 export type DeployWatchOptions = {
-  /** The build's id; by default the commit CI builds. Empty turns the watch off. */
+  /**
+   * The build's id; by default the commit CI builds, from `WORKERS_CI_COMMIT_SHA`,
+   * `CF_PAGES_COMMIT_SHA`, `GITHUB_SHA` or `CI_COMMIT_SHA`. Empty turns the watch off.
+   */
   buildId?: string;
   /**
    * Names the module, or modules, a lazily loaded file belongs to; nothing for a file in none.
@@ -38,32 +41,74 @@ export function buildFileUnder(base: string | undefined): string {
   return `${base.endsWith("/") ? base : `${base}/`}build.json`;
 }
 
+// Where CI services put the commit they build, read in this order: Cloudflare Workers Builds,
+// Cloudflare Pages, GitHub Actions, then GitLab CI and the services that share its name for it.
+const COMMIT_VARIABLES = [
+  "WORKERS_CI_COMMIT_SHA",
+  "CF_PAGES_COMMIT_SHA",
+  "GITHUB_SHA",
+  "CI_COMMIT_SHA",
+] as const;
+
+function commitFromEnvironment(): string {
+  for (const name of COMMIT_VARIABLES) {
+    const value = process.env[name];
+    if (value) return value;
+  }
+  return "";
+}
+
+function isCI(): boolean {
+  const ci = process.env.CI;
+  return !!ci && ci !== "false" && ci !== "0";
+}
+
+const NO_BUILD_ID =
+  "[deploy-watch] This build has no id, so the watch is off: tabs open on the previous deploy " +
+  `will not move onto it. None of ${COMMIT_VARIABLES.join(", ")} is set; pass the id as ` +
+  '`deployWatch({ buildId })`, or `buildId: ""` to keep the watch off without this warning.';
+
+// A framework may resolve its Vite config, and so run these hooks, once per build it runs.
+let warnedNoBuildId = false;
+
 /**
  * Gives a build its id for `@rivi-software/deploy-watch`. The server bundles get it (`BuildMeta`
  * writes it into every page) and the browser's assets get `/build.json`, which the open tabs read.
- * The id is the commit CI builds: `WORKERS_CI_COMMIT_SHA` on Cloudflare Workers Builds, GitHub's
- * own `GITHUB_SHA` otherwise. The dev server and a local build have none, so the watch stays off.
+ * The id is the commit CI builds: `WORKERS_CI_COMMIT_SHA` on Cloudflare Workers Builds,
+ * `CF_PAGES_COMMIT_SHA` on Cloudflare Pages, `GITHUB_SHA` on GitHub Actions, and `CI_COMMIT_SHA` on
+ * GitLab CI and the services that share its name, read in that order. The dev server
+ * and a local build have none, so the watch stays off; a production build in CI (`CI` set) that
+ * finds none warns once, unless the app passed `buildId`.
  *
  * The browser bundle never holds the id: a commit that changes no browser code renames no chunk,
  * and builds of one commit (one app deployed as several Workers) stay byte for byte the same.
  * `build.json` also carries the browser code's fingerprint, so a tab can tell a deploy that left
  * that code as it was, and with `modules` each module's.
  */
-export function deployWatch({
-  buildId = process.env.WORKERS_CI_COMMIT_SHA || process.env.GITHUB_SHA || "",
-  modules,
-}: DeployWatchOptions = {}): Plugin {
+export function deployWatch({ buildId, modules }: DeployWatchOptions = {}): Plugin {
+  const buildIdOrCommit = buildId ?? commitFromEnvironment();
   let id = "";
   let buildFile = "/build.json";
   let root = process.cwd();
   return {
     name: "deploy-watch",
     config(config, { command }) {
-      id = command === "build" ? buildId : "";
+      id = command === "build" ? buildIdOrCommit : "";
       buildFile = buildFileUnder(config.base);
     },
     configResolved(config) {
       root = config.root;
+      if (
+        !buildIdOrCommit &&
+        buildId === undefined &&
+        config.command === "build" &&
+        config.isProduction &&
+        isCI() &&
+        !warnedNoBuildId
+      ) {
+        warnedNoBuildId = true;
+        config.logger.warn(NO_BUILD_ID);
+      }
     },
     configEnvironment(name) {
       // The browser gets where `build.json` is served, which is the same in every build of the

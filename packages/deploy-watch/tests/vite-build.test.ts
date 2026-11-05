@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { build, type Plugin } from "vite";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { build, createBuilder, createLogger, type Plugin } from "vite";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { deployWatch } from "../src/vite.js";
 
 const packageDir = join(import.meta.dirname, "..");
@@ -89,6 +89,41 @@ test("a browser build under another base reads build.json there, and never holds
   const file = JSON.parse(asset && "source" in asset ? String(asset.source) : "{}");
   expect(file).toEqual({ id: "abc123", client: expect.stringMatching(/^[0-9a-f]{16}$/) });
 });
+
+test("a production build in CI that finds no id warns once, across its environments", async () => {
+  for (const name of [
+    "WORKERS_CI_COMMIT_SHA",
+    "CF_PAGES_COMMIT_SHA",
+    "GITHUB_SHA",
+    "CI_COMMIT_SHA",
+  ])
+    vi.stubEnv(name, "");
+  vi.stubEnv("CI", "true");
+  // Vitest's own NODE_ENV (test) makes no production build.
+  vi.stubEnv("NODE_ENV", "production");
+  const warned: string[] = [];
+  const logger = { ...createLogger("silent"), warn: (message: string) => warned.push(message) };
+  try {
+    // `vite build` resolves the config once for the app and again for each environment.
+    const builder = await createBuilder({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      customLogger: logger,
+      plugins: [deployWatch()],
+      environments: {
+        client: { build: { write: false, rollupOptions: { input: join(root, "client.js") } } },
+        ssr: { build: { write: false, ssr: "entry.js" } },
+      },
+    });
+    await builder.buildApp();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+  expect(warned.filter((message) => message.includes("deploy-watch"))).toEqual([
+    expect.stringContaining("no id"),
+  ]);
+}, 60_000);
 
 /**
  * An app with a shell and two lazily loaded modules, each of which loads a dialog lazily. Inbox

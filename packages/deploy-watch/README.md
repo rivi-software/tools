@@ -88,13 +88,13 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
 
 ## How it works
 
-- **The build's id.** The Vite plugin gives each build the commit CI builds: `WORKERS_CI_COMMIT_SHA` on Cloudflare Workers Builds, GitHub's `GITHUB_SHA` otherwise, or the `buildId` option.
+- **The build's id.** The Vite plugin gives each build the `buildId` option, or else the commit CI builds, from the first of these that is set: `WORKERS_CI_COMMIT_SHA` (Cloudflare Workers Builds), `CF_PAGES_COMMIT_SHA` (Cloudflare Pages), `GITHUB_SHA` (GitHub Actions) and `CI_COMMIT_SHA` (GitLab CI, and the services that use its name). Elsewhere, pass the commit as `buildId`.
   - The server bundle gets the id as a define.
   - The browser's assets get `build.json` (`{ "id": "<commit>", "client": "<fingerprint>", "modules": { "<name>": "<fingerprint>" } }`), served as a static file under Vite's `base`: `/build.json`, or `/app/build.json` with `base: "/app/"`.
   - The browser bundle never holds the id, so a commit that changes no browser code renames no chunk, and two builds of one commit stay byte for byte the same. It only learns where `build.json` is.
   - A relative `base` (`./`) or a `base` on another host names no fixed path, so name it yourself: `startDeployWatch({ buildFile: "/where/build.json" })`.
   - The plugin also bundles this package into server builds (`resolve.noExternal`): a define reaches only bundled code, and Vite leaves dependencies external there by default.
-  - The dev server and a local build have no id, and nothing runs.
+  - The dev server and a local build have no id, and nothing runs. A production build in CI (`CI` set) that finds no id warns once, since the tabs open on the previous deploy will not move onto it; `buildId: ""` keeps the watch off without the warning.
 - **The fingerprints.**
   - `client` covers the name and the exact content of every file of the browser build but source maps and Vite's manifests in `.vite/`. Two builds have the same `client` only when they serve the same files, so a tab on one can load every chunk it needs from the other. An app that writes its commit into its browser code gets a new `client` with every commit.
   - With `modules`, each named module's fingerprint covers what its lazily loaded files bring beyond the page that loads them: the files they import, statically or lazily, less the entry's own files and what the importers' chunks import statically. Code every page already has, such as the shell's own components, is in no module.
