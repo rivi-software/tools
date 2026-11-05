@@ -36,7 +36,12 @@ export type WorkerFile = {
 };
 
 /** A module the Worker holds, and the bytes of code it renders there. */
-export type BundledModule = { path: string; bytes: number };
+export type BundledModule = {
+  /** Its path relative to `cwd`, symlinks resolved, with `/` between segments. */
+  path: string;
+  /** The bytes of generated code it renders in the file. */
+  bytes: number;
+};
 
 /** A forbidden rule the Worker breaks, in one of its files. */
 export type ForbiddenFinding =
