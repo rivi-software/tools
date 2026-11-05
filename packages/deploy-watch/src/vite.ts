@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
 import type { Plugin, Rollup } from "vite";
+import { ownBuildFilePath } from "./own-build-file.js";
 
 /** A file the browser loads lazily (a dynamic import's target), as `modules` sees it. */
 export type LazyFile = {
@@ -73,7 +74,9 @@ let warnedNoBuildId = false;
 
 /**
  * Gives a build its id for `@rivi-software/deploy-watch`. The server bundles get it (`BuildMeta`
- * writes it into every page) and the browser's assets get `/build.json`, which the open tabs read.
+ * writes it into every page) and the browser's assets get `/build.json`, which the open tabs read,
+ * and a copy under the build's own name in the assets directory (`assets/deploy-watch-<id>.json`),
+ * which a tab reads once a deploy has replaced its build.
  * The id is the commit CI builds: `WORKERS_CI_COMMIT_SHA` on Cloudflare Workers Builds,
  * `CF_PAGES_COMMIT_SHA` on Cloudflare Pages, `GITHUB_SHA` on GitHub Actions, and `CI_COMMIT_SHA` on
  * GitLab CI and the services that share its name, read in that order. The dev server
@@ -89,6 +92,7 @@ export function deployWatch({ buildId, modules }: DeployWatchOptions = {}): Plug
   const buildIdOrCommit = buildId ?? commitFromEnvironment();
   let id = "";
   let buildFile = "/build.json";
+  let assetsDir = "assets";
   let root = process.cwd();
   return {
     name: "deploy-watch",
@@ -110,11 +114,18 @@ export function deployWatch({ buildId, modules }: DeployWatchOptions = {}): Plug
         config.logger.warn(NO_BUILD_ID);
       }
     },
-    configEnvironment(name) {
-      // The browser gets where `build.json` is served, which is the same in every build of the
-      // app, so it renames no chunk; never the id.
-      if (name === "client")
-        return { define: { __DEPLOY_WATCH_BUILD_FILE__: JSON.stringify(buildFile) } };
+    configEnvironment(name, config) {
+      // The browser gets where `build.json` and the assets are served, which is the same in every
+      // build of the app, so it renames no chunk; never the id.
+      if (name === "client") {
+        assetsDir = config.build?.assetsDir ?? "assets";
+        return {
+          define: {
+            __DEPLOY_WATCH_BUILD_FILE__: JSON.stringify(buildFile),
+            __DEPLOY_WATCH_ASSETS_DIR__: JSON.stringify(assetsDir),
+          },
+        };
+      }
       // The id reaches `pageBuildId` as a define, and a define only rewrites code the build
       // bundles; a server build leaves a dependency in node_modules external by default.
       return {
@@ -124,17 +135,17 @@ export function deployWatch({ buildId, modules }: DeployWatchOptions = {}): Plug
     },
     generateBundle(_options, bundle = {}) {
       if (!id || this.environment.name !== "client") return;
+      const ownFile = ownBuildFilePath(assetsDir, id);
       const fingerprints = fingerprintBundle(bundle, {
         id,
         root,
         modules,
         importersOf: (module) => this.getModuleInfo?.(module)?.dynamicImporters ?? [],
+        buildFiles: new Set(["build.json", ...(ownFile ? [ownFile] : [])]),
       });
-      this.emitFile({
-        type: "asset",
-        fileName: "build.json",
-        source: `${JSON.stringify({ id, ...fingerprints })}\n`,
-      });
+      const source = `${JSON.stringify({ id, ...fingerprints })}\n`;
+      this.emitFile({ type: "asset", fileName: "build.json", source });
+      if (ownFile) this.emitFile({ type: "asset", fileName: ownFile, source });
     },
   };
 }
@@ -169,9 +180,9 @@ function combine(fingerprints: Iterable<string>): string {
 
 /**
  * The browser code's fingerprint (`client`), from the name and the exact content of every file
- * but source maps and Vite's own manifests in `.vite/` (which describe the build and are never
- * loaded). It changes whenever a file the tab could load is renamed or changed, since a tab on the
- * old build may need files the new one no longer serves.
+ * but source maps, Vite's own manifests in `.vite/` (which describe the build and are never
+ * loaded) and the build's files this plugin writes. It changes whenever a file the tab could load
+ * is renamed or changed, since a tab on the old build may need files the new one no longer serves.
  *
  * Each named module's fingerprint only decides whether a notice shows, so it reads what the code
  * does: the files its lazily loaded entries bring beyond what the page that loads them (the
@@ -185,18 +196,20 @@ function fingerprintBundle(
     root,
     modules,
     importersOf,
+    buildFiles,
   }: {
     id: string;
     root: string;
     modules: DeployWatchOptions["modules"];
     importersOf: (module: string) => readonly string[];
+    buildFiles: ReadonlySet<string>;
   },
 ): Fingerprints {
   const outputs = Object.values(bundle).filter(
     (output) =>
       !output.fileName.endsWith(".map") &&
       !output.fileName.startsWith(".vite/") &&
-      output.fileName !== "build.json",
+      !buildFiles.has(output.fileName),
   );
   const client = combine(
     outputs.map(

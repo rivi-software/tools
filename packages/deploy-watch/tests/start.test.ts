@@ -6,11 +6,18 @@ afterEach(() => {
 });
 
 /**
- * A stand-in for a browser tab on build `a`, whose `/build.json` names build `b`, with the package
- * loaded fresh and the watch not started yet.
+ * A stand-in for a browser tab on build `id`, whose `/build.json` answers `live` and whose build's
+ * own copy answers `own` (a 404 without one), with the package loaded fresh and the watch not
+ * started yet.
  */
-async function openTab() {
+async function openTab({
+  id = "a",
+  live = { id: "b" } as object,
+  own = null as object | null,
+} = {}) {
   const loads: (string | undefined)[] = [];
+  const fetched: string[] = [];
+  const later: (() => void)[] = [];
   const stored = new Map<string, string>();
   const tabWindow = Object.assign(new EventTarget(), {
     location: {
@@ -22,20 +29,30 @@ async function openTab() {
       setItem: (key: string, value: string) => void stored.set(key, value),
     },
     setInterval: () => 0,
+    // What the tab leaves for later: its first read of `/build.json`, where it cannot wait until
+    // the browser is idle.
+    setTimeout: (callback: () => void) => void later.push(callback),
   });
   const page = Object.assign(new EventTarget(), {
     visibilityState: "visible",
-    querySelector: () => ({ content: "a" }),
+    querySelector: () => ({ content: id }),
   });
   vi.stubGlobal("window", tabWindow);
   vi.stubGlobal("document", page);
-  vi.stubGlobal("fetch", async () => Response.json({ id: "b" }));
+  vi.stubGlobal("fetch", async (url: string) => {
+    fetched.push(url);
+    if (url === "/build.json") return Response.json(live);
+    return own ? Response.json(own) : new Response("Not found", { status: 404 });
+  });
   // A fresh module: the watch starts once per page.
   vi.resetModules();
   const deployWatch = await import("../src/index.js");
   return {
     ...deployWatch,
+    window: tabWindow,
     loads,
+    fetched,
+    later,
     dispatch: (type: string, fields: Record<string, unknown> = {}) =>
       tabWindow.dispatchEvent(Object.assign(new Event(type), fields)),
     /** Starts the watch and waits until the tab knows `b` is live. */
@@ -70,6 +87,35 @@ function router() {
     },
   };
 }
+
+test("the tab reads /build.json once the browser is idle, and its build's own copy after a deploy", async () => {
+  const tab = await openTab({ live: { id: "b", client: "c1" }, own: { id: "a", client: "c1" } });
+  tab.startDeployWatch();
+  let told = 0;
+  tab.subscribeToNewBuild(() => told++);
+  expect(tab.fetched).toEqual([]);
+  for (const callback of tab.later.splice(0)) callback();
+  await vi.waitFor(() => expect(told).toBe(1));
+  expect(tab.fetched).toEqual(["/build.json", "/assets/deploy-watch-a.json"]);
+  // The deploy changed only the server.
+  expect(tab.isNewBuildLive()).toBe(false);
+});
+
+test("the first read waits until the browser is idle, where it can tell", async () => {
+  const tab = await openTab({ live: { id: "a" } });
+  const idle: (() => void)[] = [];
+  Object.assign(tab.window, { requestIdleCallback: (callback: () => void) => idle.push(callback) });
+  tab.startDeployWatch();
+  expect(tab.later).toEqual([]);
+  idle.forEach((callback) => callback());
+  await vi.waitFor(() => expect(tab.fetched).toEqual(["/build.json"]));
+});
+
+test("a build whose id is not a plain file name has no copy to read", async () => {
+  const tab = await openTab({ id: "feature/x" });
+  await tab.start();
+  expect(tab.fetched).toEqual(["/build.json"]);
+});
 
 test("a tab that stayed at the unsaved-work prompt reloads again after the next press", async () => {
   const tab = await startTab();

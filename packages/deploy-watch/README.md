@@ -94,8 +94,9 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
 - **The build's id.** The Vite plugin gives each build the `buildId` option, or else the commit CI builds, from the first of these that is set: `WORKERS_CI_COMMIT_SHA` (Cloudflare Workers Builds), `CF_PAGES_COMMIT_SHA` (Cloudflare Pages), `GITHUB_SHA` (GitHub Actions) and `CI_COMMIT_SHA` (GitLab CI, and the services that use its name). Elsewhere, pass the commit as `buildId`.
   - The server bundle gets the id as a define.
   - The browser's assets get `build.json` (`{ "id": "<commit>", "client": "<fingerprint>", "modules": { "<name>": "<fingerprint>" } }`), served as a static file under Vite's `base`: `/build.json`, or `/app/build.json` with `base: "/app/"`.
-  - The browser bundle never holds the id, so a commit that changes no browser code renames no chunk, and two builds of one commit stay byte for byte the same. It only learns where `build.json` is.
-  - A relative `base` (`./`) or a `base` on another host names no fixed path, so name it yourself: `startDeployWatch({ buildFile: "/where/build.json" })`.
+  - They also get a copy of it under the build's own name in the assets directory (`build.assetsDir`): `assets/deploy-watch-<id>.json`. A deploy replaces `build.json`, but a host that keeps a replaced build's assets keeps the copy too, so a tab can still read its own build's file (see _The page's own build_ below). An id that is not a plain file name (letters, digits, `_`, `.` and `-`, at most 100) gets no copy.
+  - The browser bundle never holds the id, so a commit that changes no browser code renames no chunk, and two builds of one commit stay byte for byte the same. It only learns where `build.json` and the assets directory are, and reads the copy's name from the page's id.
+  - A relative `base` (`./`) or a `base` on another host names no fixed path, so name it yourself: `startDeployWatch({ buildFile: "/where/build.json" })`. The tab looks for the copy in the assets directory beside it: `/where/assets/deploy-watch-<id>.json`.
   - The plugin also bundles this package into server builds (`resolve.noExternal`): a define reaches only bundled code, and Vite leaves dependencies external there by default.
   - The dev server and a local build have no id, and nothing runs. A production build in CI (`CI` set) that finds no id warns once, since the tabs open on the previous deploy will not move onto it; `buildId: ""` keeps the watch off without the warning.
 - **The fingerprints.**
@@ -104,13 +105,17 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
   - A module's fingerprint decides only whether the notice shows, so it reads what the code does. Rollup renames a chunk when any chunk it imports, even lazily, was renamed, so one changed file renames most of a bundle. The module fingerprint reads each file's content with every name of a file in the bundle taken out, and with the build's id too (the whole id, or its first seven characters alone), since an app may write its release into its code for error reports. A `buildId` shorter than seven characters, such as a CI build number, is not taken out.
 - **The page's id.** `BuildMeta` renders `<meta name="deploy-watch-build">` in the document's head on the server. In the browser it reads the tag back, so hydration matches.
 - **The check.** `startDeployWatch()` reads `build.json` (`no-store`, without cookies, giving up after 10 s):
+  - once soon after the page loads, when the browser is idle (or after 2 s where it cannot say)
   - when the tab comes back into view, gets focus or comes back online, at most once a minute
   - every ten minutes while it is visible
   - after a back/forward-cache restore
   - at once when Vite's preload helper reports a chunk that failed (`vite:preloadError`)
 
   Once the live build has other browser code than the page's, it is new, and it stays new for the tab; later checks keep reading `build.json`, since a later deploy may change another module. An answer that is not a build file, such as a sign-in page in its place, changes nothing, so serve `build.json` to visitors who are not signed in.
-- **The page's own build.** The page knows only its build's id. The first answer that names that id is its own `build.json`, and once the tab has it, a build with the same `client` is not new. A notice for a module (`useNewBuildNotice({ module })`) reads the file once right away (`learnPageBuild`), while it most likely still names the page's own build. A tab that never read it, because a deploy came first, takes any other id as new and every module as changed, as if no fingerprints were there.
+- **The page's own build.** The page knows only its build's id. To compare a deploy's fingerprints with its own, it needs its own build's file, and once the tab has it, a build with the same `client` is not new:
+  - The first read, soon after the page loads, most likely still finds the page's own build in `build.json`.
+  - A check that finds another build there, while the tab has no file of its own yet, reads the build's own copy (`assets/deploy-watch-<id>.json`) once. On Cloudflare Workers, [`@rivi-software/cloudflare-deploy`'s skew protection](https://github.com/rivi-software/tools/tree/main/packages/cloudflare-deploy#skew-protection) keeps it, with the rest of `/assets/*`, for seven days after the deploy that replaced it.
+  - A tab that finds neither, because a deploy came before its first read and its host keeps no replaced files, takes any other id as new and every module as changed, as if no fingerprints were there.
 - **The move.** Once the build is new:
   - `followNewBuild(router)` makes the router's next move to another path a whole-page load. It runs on `onBeforeNavigate`, after the router's blockers let the move through, and flushes the history's queued address change before it reloads, so the destination loads with one history entry. A move within the page (its search or hash) stays in place. It follows the router whether `startDeployWatch()` runs before or after it, since each move asks the watch that runs then; on the server it does nothing.
   - `useNewBuildNotice()` gives a notice its state: `show`, `dismiss` and `reload`. A reload on a page with unsaved work asks first, through the page's own `beforeunload`; if the user stays, the next click asks again. With `{ module }`, `show` waits until the new build changes that module (`isModuleChanged`).
@@ -182,14 +187,14 @@ From `@rivi-software/deploy-watch` (browser and server; on the server, and in a 
 | `isChunkLoadError(error)` | Whether `error` is a chunk of script or style that did not load |
 | `isNewBuildLive()`, `subscribeToNewBuild(listener)` | Whether a newer build with other browser code is live; a listener for the moment it is, for what the tab learns after, and for a dismissed notice (returns the unsubscribe) |
 | `isModuleChanged(module)` | Whether a newer build is live and changes `module`, or the tab cannot tell |
-| `learnPageBuild()` | Reads `build.json` once, unless a check already has, so `isModuleChanged` can compare later deploys with the page's own build |
+| `learnPageBuild()` | Reads `build.json` once, unless a check already has, so `isModuleChanged` can compare later deploys with the page's own build. `startDeployWatch()` calls it once the browser is idle; call it to read sooner |
 | `dismissNewBuildNotice(module?)`, `isNewBuildNoticeDismissed(module?)` | Hides the notice for `module`, or the one without a module, in every notice of the tab until a later build has other code; whether it is hidden for the live build. `subscribeToNewBuild` listeners hear of a dismissal |
 | `reloadOntoNewBuild(href?)` | Loads `href`, or this page again, on the live build |
 | `isReloadingOntoNewBuild()`, `subscribeToReload(listener)` | Whether a reload is under way, so errors until the page is gone can go unreported; a listener for when that changes (returns the unsubscribe) |
 | `isWatching()` | Whether the watch runs: a deployed build, in the browser |
 | `pageBuildId()` | The page's build id: the build's on the server, the meta tag's in the browser; empty without one |
 | `parseBuildFile(body)` | The `BuildFile` a parsed `build.json` describes (`id`, and `client` and `modules` when it has them), or `null` |
-| `createDeployWatch(deps)` | The watch over injected dependencies (`current`, `fetchLive`, `now`, `storage`, `load`), for tests and other hosts |
+| `createDeployWatch(deps)` | The watch over injected dependencies (`current`, `fetchLive`, `fetchOwn?`, `now`, `storage`, `load`), for tests and other hosts |
 | `BUILD_META_NAME`, `BUILD_FILE` | `deploy-watch-build` and `/build.json` |
 | `CHECK_SPACING_MS`, `CHECK_INTERVAL_MS` | A minute between checks the tab's own activity starts; ten minutes between checks while it is visible |
 | `RELOADED_FOR_KEY`, `CHUNK_RETRY_KEY` | The session storage keys of the [loop guard](#how-it-works) |
@@ -208,14 +213,14 @@ From `@rivi-software/deploy-watch/vite` (Vite config):
 
 | Export | What |
 | --- | --- |
-| `deployWatch({ buildId?, modules? })` | The Vite plugin; an empty `buildId` turns the watch off, and `modules` names the module of each lazily loaded file |
+| `deployWatch({ buildId?, modules? })` | The Vite plugin, which writes `build.json` and the build's own copy; an empty `buildId` turns the watch off, and `modules` names the module of each lazily loaded file |
 | `buildFileUnder(base)` | Where `build.json` is served under a `base` |
 | `PACKAGE_PATTERN` | What the plugin bundles into server builds |
 | Types | `DeployWatchOptions`, `LazyFile` |
 
 ## Development
 
-The tests in `tests/` cover the watch over injected dependencies: the spacing between checks, the shared request, the loop guard, the reload and a reload that does not happen, chunk recovery, the router's moves, the page's own build, module changes and the notice's dismissal. They also cover the watch started in a stand-in browser tab, with a router followed before or after it starts, an error screen's check for each error it renders (in happy-dom), the Vite plugin's hooks, a real server build against the package as npm installs it, and real browser builds whose fingerprints change only with the code each module brings. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+The tests in `tests/` cover the watch over injected dependencies: the spacing between checks, the shared request, the loop guard, the reload and a reload that does not happen, chunk recovery, the router's moves, the page's own build and its copy after a deploy, module changes and the notice's dismissal. They also cover the watch started in a stand-in browser tab, with its first read once the browser is idle and a router followed before or after it starts, an error screen's check for each error it renders (in happy-dom), the Vite plugin's hooks, a real server build against the package as npm installs it, and real browser builds whose fingerprints change only with the code each module brings. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
 
 ## License
 

@@ -17,32 +17,49 @@ function run(command: "build" | "serve", buildId: string | undefined, base?: str
       emitFile: (file: unknown) => emitted.push(file),
     });
   return {
-    define: (environment: string) => call(plugin.configEnvironment, null, environment, {}, {}),
+    define: (environment: string, config = {}) =>
+      call(plugin.configEnvironment, null, environment, config, {}),
     bundle,
     emitted,
   };
 }
 
-test("a build gives the server its id and the browser's assets /build.json", () => {
+test("a build gives the server its id and the browser's assets /build.json and the build's own copy", () => {
   const build = run("build", "abc123");
   expect(build.define("ssr")).toEqual({
     define: { __DEPLOY_WATCH_BUILD_ID__: '"abc123"' },
     resolve: { noExternal: [PACKAGE_PATTERN] },
   });
-  // The browser bundle never holds the id, only where to read the live one; the page has its own.
+  // The browser bundle never holds the id, only where to read the files; the page has its own id.
   expect(build.define("client")).toEqual({
-    define: { __DEPLOY_WATCH_BUILD_FILE__: '"/build.json"' },
+    define: {
+      __DEPLOY_WATCH_BUILD_FILE__: '"/build.json"',
+      __DEPLOY_WATCH_ASSETS_DIR__: '"assets"',
+    },
   });
   build.bundle("ssr");
   build.bundle("client");
   // With the id, the browser code's fingerprint: here, of an empty bundle.
+  const source = '{"id":"abc123","client":"e3b0c44298fc1c14"}\n';
   expect(build.emitted).toEqual([
-    {
-      type: "asset",
-      fileName: "build.json",
-      source: '{"id":"abc123","client":"e3b0c44298fc1c14"}\n',
-    },
+    { type: "asset", fileName: "build.json", source },
+    { type: "asset", fileName: "assets/deploy-watch-abc123.json", source },
   ]);
+});
+
+test("the build's own copy goes into the browser build's assets directory, for a plain id only", () => {
+  const build = run("build", "abc123");
+  expect(build.define("client", { build: { assetsDir: "/static/" } })).toMatchObject({
+    define: { __DEPLOY_WATCH_ASSETS_DIR__: '"/static/"' },
+  });
+  build.bundle("client");
+  expect(build.emitted).toMatchObject([
+    { fileName: "build.json" },
+    { fileName: "static/deploy-watch-abc123.json" },
+  ]);
+  const unplain = run("build", "feature/x");
+  unplain.bundle("client");
+  expect(unplain.emitted).toMatchObject([{ fileName: "build.json" }]);
 });
 
 test("the dev server and a build without an id leave the watch off", () => {
@@ -58,7 +75,7 @@ test("the dev server and a build without an id leave the watch off", () => {
 });
 
 test("under another base, the browser reads build.json where that base serves it", () => {
-  expect(run("build", "abc123", "/app/").define("client")).toEqual({
+  expect(run("build", "abc123", "/app/").define("client")).toMatchObject({
     define: { __DEPLOY_WATCH_BUILD_FILE__: '"/app/build.json"' },
   });
   expect(buildFileUnder(undefined)).toBe("/build.json");

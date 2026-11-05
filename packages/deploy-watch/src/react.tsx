@@ -8,7 +8,6 @@ import {
   isNewBuildNoticeDismissed,
   isReloadingOntoNewBuild,
   isWatching,
-  learnPageBuild,
   pageBuildId,
   recoverFromChunkError,
   reloadOntoNewBuild,
@@ -57,12 +56,6 @@ export function useNewBuildNotice({ module }: NewBuildNoticeOptions = {}): {
       !isNewBuildNoticeDismissed(module),
     () => false,
   );
-  const scoped = module !== undefined;
-  // A notice for a module compares a later deploy with the page's own build, so it reads that
-  // build's file while it is most likely still the live one.
-  useEffect(() => {
-    if (scoped) learnPageBuild();
-  }, [scoped]);
   return {
     show,
     dismiss: () => {
