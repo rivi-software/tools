@@ -24,8 +24,8 @@
  * A failed hover or idle preload only triggers the check: the page reloads when it needs the
  * code, never under someone reading or typing. A chunk that fails while the page's build is
  * still the live one is on the server, so the browser failed to fetch it: the error screen
- * reloads the page once for that build, and a second failure is a real fault and stays the
- * screen's. In development, and in any build without an id, nothing runs.
+ * reloads the page once for that build, and a second failure within `LOOP_GUARD_MS` is a real
+ * fault and stays the screen's. In development, and in any build without an id, nothing runs.
  */
 
 import { ownBuildFilePath } from "./own-build-file.js";
@@ -48,12 +48,23 @@ export const CHECK_INTERVAL_MS = 10 * 60_000;
 // The longest the first read of the live file waits for the browser to be idle after the watch
 // starts, and how long it waits where the browser cannot say.
 const IDLE_READ_MS = 2_000;
-/** The build this tab last reloaded for, in its session storage. */
+/** The build this tab last reloaded for, and when, in its session storage. */
 export const RELOADED_FOR_KEY = "deploy-watch:reloaded-for";
-/** The live build this tab last reloaded on because one of its chunks failed, in its session storage. */
+/**
+ * The live build this tab last reloaded on because one of its chunks failed, and when, in its
+ * session storage.
+ */
 export const CHUNK_RETRY_KEY = "deploy-watch:chunk-retry-for";
+/**
+ * How long a loop guard (`RELOADED_FOR_KEY`, `CHUNK_RETRY_KEY`) holds. A reload loop takes
+ * seconds; after this, a later check can try the reload again.
+ */
+export const LOOP_GUARD_MS = CHECK_INTERVAL_MS;
 
 type SessionStore = Pick<Storage, "getItem" | "setItem">;
+
+/** A loop guard: the build a reload was for, and when the tab wrote it. */
+type Guard = { id: string; at: number };
 
 /** What `/build.json` says about a build; the Vite plugin writes it. */
 export type BuildFile = {
@@ -106,13 +117,14 @@ export function createDeployWatch({
   storage,
   load,
 }: DeployWatchDeps) {
-  // A build this tab already reloaded for and still did not get (a server that renders the old
-  // build after the assets moved on) is not new to it: reloading for it again would loop.
-  const reloadedFor = readStorage(storage, RELOADED_FOR_KEY);
-  // The build this tab already reloaded on once because one of its own chunks failed to load.
-  const retriedFor = readStorage(storage, CHUNK_RETRY_KEY);
+  const loadedAt = now();
+  // A build this tab just reloaded for and still did not get (a server, or a cache, that serves the
+  // old build after the assets moved on) is not new to it: reloading for it again would loop.
+  const reloadedFor = readGuard(storage, RELOADED_FOR_KEY, loadedAt);
+  // The build this tab just reloaded on because one of its own chunks failed to load.
+  const retriedFor = readGuard(storage, CHUNK_RETRY_KEY, loadedAt);
   // The page has just loaded the build it runs, so the first check waits like any other.
-  let lastCheck = now();
+  let lastCheck = loadedAt;
   let asked = false;
   // The page's own build, as `/build.json` described it while it was live, or its own copy did.
   let own: BuildFile | null = null;
@@ -129,6 +141,14 @@ export function createDeployWatch({
   const dismissed = new Map<string | undefined, BuildFile>();
   const listeners = new Set<() => void>();
   const reloadListeners = new Set<() => void>();
+
+  /**
+   * Whether `guard` is for `build` and still holds: written less than `LOOP_GUARD_MS` ago, or
+   * ahead, by a clock set back since.
+   */
+  function holds(guard: Guard | null, build: string): boolean {
+    return guard?.id === build && Math.abs(now() - guard.at) < LOOP_GUARD_MS;
+  }
 
   /**
    * Whether `build` runs the page's browser code: the page's own build, or a later one whose
@@ -185,7 +205,12 @@ export function createDeployWatch({
         }
         pending = null;
         answeredOwnCode = answer !== null && sameCode(answer);
-        if (answer && !answeredOwnCode && answer.id !== reloadedFor && answer.id !== live?.id) {
+        if (
+          answer &&
+          !answeredOwnCode &&
+          !holds(reloadedFor, answer.id) &&
+          answer.id !== live?.id
+        ) {
           live = answer;
           changed = true;
         }
@@ -195,11 +220,14 @@ export function createDeployWatch({
     return pending;
   }
 
-  /** Writes `build` under `key` in the tab's session storage; false where the browser refuses it. */
+  /**
+   * Writes a guard for `build` under `key` in the tab's session storage; false where the browser
+   * refuses it.
+   */
   function remember(key: string, build: string): boolean {
     if (!storage) return false;
     try {
-      storage.setItem(key, build);
+      storage.setItem(key, JSON.stringify({ id: build, at: now() } satisfies Guard));
       return true;
     } catch {
       return false;
@@ -293,7 +321,7 @@ export function createDeployWatch({
     },
     /**
      * For an error screen: true when `error` is a chunk that did not load and the tab is reloading,
-     * onto the new build or, once per build, onto its own.
+     * onto the new build or, once per build within `LOOP_GUARD_MS`, onto its own.
      */
     async recover(error: unknown): Promise<boolean> {
       if (!isChunkLoadError(error)) return false;
@@ -305,9 +333,9 @@ export function createDeployWatch({
       // `/build.json` names the page's own browser code, so the chunk is on the server and the
       // browser failed to fetch it. Chromium keeps a failed module import for the life of the
       // document (whatwg/html#6768), so only a new page fetches it again. The tab reloads once for
-      // its build; a second failure, an unanswered check (offline) or no storage to remember the
-      // first reload in is the screen's.
-      if (!answeredOwnCode || retriedFor === current || !remember(CHUNK_RETRY_KEY, current))
+      // its build; a second failure soon after, an unanswered check (offline) or no storage to
+      // remember the first reload in is the screen's.
+      if (!answeredOwnCode || holds(retriedFor, current) || !remember(CHUNK_RETRY_KEY, current))
         return false;
       setReloading(true);
       load();
@@ -321,12 +349,25 @@ export function createDeployWatch({
   };
 }
 
-function readStorage(storage: SessionStore | null, key: string): string | null {
+/**
+ * The guard under `key` in the tab's session storage. A bare id, as the tab wrote it before guards
+ * had a time, reads as written at `loadedAt`, when the page loaded.
+ */
+function readGuard(storage: SessionStore | null, key: string, loadedAt: number): Guard | null {
+  let value: string | null;
   try {
-    return storage?.getItem(key) ?? null;
+    value = storage?.getItem(key) ?? null;
   } catch {
     return null;
   }
+  if (!value) return null;
+  try {
+    const { id, at } = JSON.parse(value) as Partial<Guard>;
+    if (typeof id === "string" && typeof at === "number") return { id, at };
+  } catch {
+    // Not JSON: a bare id.
+  }
+  return { id: value, at: loadedAt };
 }
 
 /** The build a `/build.json` body describes, or null for anything else. */
@@ -553,8 +594,8 @@ export function subscribeToReload(listener: () => void): () => void {
 /**
  * For an error screen: resolves true when `error` is a chunk that did not load and the page is
  * reloading (show nothing): onto the newer build that replaced the page's, or, the first time a
- * chunk of the live build fails in this tab, onto that build again. False when the screen should
- * show.
+ * chunk of the live build fails in this tab within `LOOP_GUARD_MS`, onto that build again. False
+ * when the screen should show.
  */
 export function recoverFromChunkError(error: unknown): Promise<boolean> {
   return watch?.recover(error) ?? Promise.resolve(false);
