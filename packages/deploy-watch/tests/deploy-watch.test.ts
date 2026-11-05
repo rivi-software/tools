@@ -5,6 +5,7 @@ import {
   CHUNK_RETRY_KEY,
   createDeployWatch,
   isChunkLoadError,
+  LOOP_GUARD_MS,
   parseBuildFile,
   RELOADED_FOR_KEY,
   type NavigationEvent,
@@ -20,6 +21,14 @@ function memoryStorage(entries: Record<string, string> = {}) {
 
 type Answer = string | BuildFile | null | Error;
 
+// When each test's tab loads its page.
+const LOADED_AT = 1_000_000;
+
+/** A loop guard for `id`, as the tab writes it `ago` milliseconds before its page loads. */
+function guard(id: string, ago = 0) {
+  return JSON.stringify({ id, at: LOADED_AT - ago });
+}
+
 /**
  * A tab on build `a`, whose `/build.json` answers `live` (a bare id is a file with only the id),
  * whose build's own copy answers `own` (left out, the tab has none to read), and whose clock the
@@ -30,7 +39,7 @@ function tab({
   own = undefined as Answer | undefined,
   storage = memoryStorage(),
 } = {}) {
-  let time = 1_000_000;
+  let time = LOADED_AT;
   const loads: (string | undefined)[] = [];
   const state = { live, fetches: 0, ownFetches: 0 };
   const answer = async (value: Answer) => {
@@ -112,13 +121,48 @@ test("a failed or unreadable answer leaves the tab where it is", async () => {
   expect(failed.watch.isNew() || empty.watch.isNew()).toBe(false);
 });
 
-test("a build the tab already reloaded for and did not get is not new again", async () => {
+test("a build the tab just reloaded for and did not get is not new again for a while", async () => {
   // The server still rendered build `a` after the assets moved on to `b`: another reload would loop.
-  const { watch } = tab({ live: "b", storage: memoryStorage({ [RELOADED_FOR_KEY]: "b" }) });
+  const { watch, advance } = tab({
+    live: "b",
+    storage: memoryStorage({ [RELOADED_FOR_KEY]: guard("b", 1_000) }),
+  });
   expect(await watch.check({ force: true })).toBe(false);
-  // A later deploy is new again.
-  const later = tab({ live: "c", storage: memoryStorage({ [RELOADED_FOR_KEY]: "b" }) });
+  advance(LOOP_GUARD_MS - 2_000);
+  expect(await watch.check({ force: true })).toBe(false);
+  // A loop takes seconds. Later, a stale cache that served the old page has most likely expired,
+  // and the tab tries again.
+  advance(1_000);
+  expect(await watch.check({ force: true })).toBe(true);
+  // A later deploy is new at once.
+  const later = tab({ live: "c", storage: memoryStorage({ [RELOADED_FOR_KEY]: guard("b") }) });
   expect(await later.watch.check({ force: true })).toBe(true);
+  // A page that loads long after the reload tries again too.
+  const stale = tab({
+    live: "b",
+    storage: memoryStorage({ [RELOADED_FOR_KEY]: guard("b", LOOP_GUARD_MS) }),
+  });
+  expect(await stale.watch.check({ force: true })).toBe(true);
+});
+
+test("a guard written before guards had a time holds from when the page loaded", async () => {
+  // A tab open across the upgrade of this package, with the bare id it wrote before.
+  const { watch, advance } = tab({
+    live: "b",
+    storage: memoryStorage({ [RELOADED_FOR_KEY]: "b" }),
+  });
+  advance(LOOP_GUARD_MS - 1);
+  expect(await watch.check({ force: true })).toBe(false);
+  advance(1);
+  expect(await watch.check({ force: true })).toBe(true);
+});
+
+test("a guard from a clock set back since does not hold for longer", async () => {
+  const { watch } = tab({
+    live: "b",
+    storage: memoryStorage({ [RELOADED_FOR_KEY]: guard("b", -2 * LOOP_GUARD_MS) }),
+  });
+  expect(await watch.check({ force: true })).toBe(true);
 });
 
 test("the reload remembers the build it is for and happens once", async () => {
@@ -130,7 +174,7 @@ test("the reload remembers the build it is for and happens once", async () => {
   watch.reload();
   expect(loads).toEqual(["/inbox"]);
   expect(watch.isReloading()).toBe(true);
-  expect(storage.getItem(RELOADED_FOR_KEY)).toBe("b");
+  expect(storage.getItem(RELOADED_FOR_KEY)).toBe(guard("b"));
 });
 
 test("a reload that did not happen starts again once the tab resumes", async () => {
@@ -186,7 +230,7 @@ test("an error screen reloads onto a newer build for a missing chunk, not for an
   expect(replaced.loads).toEqual([undefined]);
 });
 
-test("a chunk of the live build that failed reloads the page once for that build", async () => {
+test("a chunk of the live build that failed reloads the page once for that build for a while", async () => {
   const chunk = new TypeError("Failed to fetch dynamically imported module: /assets/x.js");
   // The page's build is still the live one: the browser failed to fetch the chunk, and keeps that
   // failure for the document's life, so the tab reloads onto its own build.
@@ -194,13 +238,18 @@ test("a chunk of the live build that failed reloads the page once for that build
   expect(await first.watch.recover(chunk)).toBe(true);
   expect(first.loads).toEqual([undefined]);
   expect(first.watch.isReloading()).toBe(true);
-  expect(first.storage.getItem(CHUNK_RETRY_KEY)).toBe("a");
+  expect(first.storage.getItem(CHUNK_RETRY_KEY)).toBe(guard("a"));
   expect(await first.watch.recover(chunk)).toBe(true);
   expect(first.loads).toEqual([undefined]);
-  // It failed again after that reload: the chunk is broken, and the screen shows it.
+  // It failed again right after that reload: the chunk is broken, and the screen shows it.
   const again = tab({ live: "a", storage: first.storage });
   expect(await again.watch.recover(chunk)).toBe(false);
   expect(again.loads).toEqual([]);
+  // Another dropped connection, long after: a reload fixes it again.
+  again.advance(LOOP_GUARD_MS);
+  expect(await again.watch.recover(chunk)).toBe(true);
+  expect(again.loads).toEqual([undefined]);
+  expect(again.storage.getItem(CHUNK_RETRY_KEY)).toBe(guard("a", -LOOP_GUARD_MS));
   // A later build gets its own reload.
   const later = createDeployWatch({
     current: "b",
@@ -423,7 +472,7 @@ test("a chunk that failed while the live build has the page's browser code reloa
   state.live = { id: "b", client: "c1" };
   expect(await watch.recover(chunk)).toBe(true);
   expect(loads).toEqual([undefined]);
-  expect(storage.getItem(CHUNK_RETRY_KEY)).toBe("a");
+  expect(storage.getItem(CHUNK_RETRY_KEY)).toBe(guard("a"));
 });
 
 test("the router's next move to another page loads it whole once a newer build is live", async () => {
