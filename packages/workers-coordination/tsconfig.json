@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "tests"],
+  // tests/types type-checks a Worker against the real Workers types, with its own tsconfig.
+  "exclude": ["node_modules", "dist", "tests/types"]
+}
