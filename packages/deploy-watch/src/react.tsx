@@ -4,12 +4,14 @@ import {
   isChunkLoadError,
   isModuleChanged,
   isNewBuildLive,
+  isReloadingOntoNewBuild,
   isWatching,
   learnPageBuild,
   pageBuildId,
   recoverFromChunkError,
   reloadOntoNewBuild,
   subscribeToNewBuild,
+  subscribeToReload,
 } from "./index.js";
 
 /**
@@ -65,19 +67,23 @@ export function useNewBuildNotice({ module }: NewBuildNoticeOptions = {}): {
 /**
  * For an error screen: true while a missing chunk is checked against the live build, and while the
  * page reloads onto a newer one (render a placeholder, not the error); false once the error is the
- * screen's to show. The server render and any other error read false from the start.
+ * screen's to show, which includes a reload the user stayed through at the unsaved-work prompt.
+ * The server render and any other error read false from the start.
  */
 export function useChunkErrorRecovery(error: unknown): boolean {
-  const [checking, setChecking] = useState(() => isWatching() && isChunkLoadError(error));
+  const [state, setState] = useState<"checking" | "reloading" | "shown">(() =>
+    isWatching() && isChunkLoadError(error) ? "checking" : "shown",
+  );
+  const reloading = useSyncExternalStore(subscribeToReload, isReloadingOntoNewBuild, () => false);
   useEffect(() => {
-    if (!checking) return;
+    if (state !== "checking") return;
     let mounted = true;
-    void recoverFromChunkError(error).then((reloading) => {
-      if (mounted && !reloading) setChecking(false);
+    void recoverFromChunkError(error).then((reloads) => {
+      if (mounted) setState(reloads ? "reloading" : "shown");
     });
     return () => {
       mounted = false;
     };
-  }, [checking, error]);
-  return checking;
+  }, [state, error]);
+  return state === "checking" || (state === "reloading" && reloading);
 }

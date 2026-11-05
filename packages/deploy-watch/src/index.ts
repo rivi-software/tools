@@ -100,6 +100,7 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
   let pending: Promise<boolean> | null = null;
   let reloading = false;
   const listeners = new Set<() => void>();
+  const reloadListeners = new Set<() => void>();
 
   /**
    * Whether `build` runs the page's browser code: the page's own build, or a later one whose
@@ -153,10 +154,17 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
     }
   }
 
+  /** Marks the tab as reloading or not, and tells the reload listeners when that changes. */
+  function setReloading(value: boolean) {
+    if (reloading === value) return;
+    reloading = value;
+    for (const listener of reloadListeners) listener();
+  }
+
   /** Moves the tab onto the live build: `href` as a whole page, or this page again. */
   function reload(href?: string) {
     if (reloading || !live) return;
-    reloading = true;
+    setReloading(true);
     // Without storage the reload still happens; only the loop guard is lost.
     remember(RELOADED_FOR_KEY, live.id);
     load(href);
@@ -184,10 +192,25 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
       if (!asked) void check({ force: true });
     },
     isReloading: () => reloading,
+    /**
+     * The page is still here after a reload started: the user stayed at its unsaved-work prompt,
+     * or the back/forward cache brought it back. The tab can reload again, and errors are faults
+     * again.
+     */
+    resume() {
+      setReloading(false);
+    },
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
+      };
+    },
+    /** Calls `listener` when `isReloading()` changes. */
+    subscribeToReload(listener: () => void) {
+      reloadListeners.add(listener);
+      return () => {
+        reloadListeners.delete(listener);
       };
     },
     /**
@@ -208,7 +231,7 @@ export function createDeployWatch({ current, fetchLive, now, storage, load }: De
       // first reload in is the screen's.
       if (!answeredOwnCode || retriedFor === current || !remember(CHUNK_RETRY_KEY, current))
         return false;
-      reloading = true;
+      setReloading(true);
       load();
       return true;
     },
@@ -335,9 +358,24 @@ export function startDeployWatch({ buildFile }: StartOptions = {}): void {
   });
   window.addEventListener("focus", () => void tab.check());
   window.addEventListener("online", () => void tab.check());
-  // A page restored from the back/forward cache may have slept through any number of deploys.
+  // A reload can leave the page where it is: the user stays at its unsaved-work prompt. A key or
+  // pointer pressed after the reload started shows the page is still in use; during a slow reload
+  // it only lets the user start it again, which the browser takes as a new navigation. A held key
+  // repeats the press that started the reload, and would restart it with every repeat.
+  window.addEventListener("pointerdown", () => tab.resume(), true);
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (!event.repeat) tab.resume();
+    },
+    true,
+  );
+  // A page restored from the back/forward cache is still here, whatever reload it started before
+  // it went, and may have slept through any number of deploys.
   window.addEventListener("pageshow", (event) => {
-    if (event.persisted) void tab.check({ force: true });
+    if (!event.persisted) return;
+    tab.resume();
+    void tab.check({ force: true });
   });
   window.setInterval(() => {
     if (visible()) void tab.check();
@@ -394,10 +432,20 @@ export function reloadOntoNewBuild(href?: string): void {
 
 /**
  * True once the tab is reloading, onto a new build or after one of its chunks failed to load;
- * errors until the page is gone are expected, not faults.
+ * errors until the page is gone are expected, not faults. False again once the page is evidently
+ * still here: at the first key or pointer press after the reload started (the user stayed at the
+ * unsaved-work prompt), or when the back/forward cache brings it back.
  */
 export function isReloadingOntoNewBuild(): boolean {
   return watch?.isReloading() ?? false;
+}
+
+/**
+ * Calls `listener` when `isReloadingOntoNewBuild()` changes: a reload starts, or the page turns out
+ * to be still here. An error screen that shows nothing while the page reloads shows its error then.
+ */
+export function subscribeToReload(listener: () => void): () => void {
+  return watch?.subscribeToReload(listener) ?? (() => {});
 }
 
 /**

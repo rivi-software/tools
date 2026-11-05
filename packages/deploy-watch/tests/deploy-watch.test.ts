@@ -115,6 +115,47 @@ test("the reload remembers the build it is for and happens once", async () => {
   expect(storage.getItem(RELOADED_FOR_KEY)).toBe("b");
 });
 
+test("a reload that did not happen starts again once the tab resumes", async () => {
+  const { watch, loads } = tab({ live: "b" });
+  const reloading: boolean[] = [];
+  watch.subscribeToReload(() => reloading.push(watch.isReloading()));
+  await watch.check({ force: true });
+  watch.reload();
+  // The user stayed at the page's unsaved-work prompt and clicks Reload again.
+  watch.reload();
+  expect(loads).toEqual([undefined]);
+  watch.resume();
+  expect(watch.isReloading()).toBe(false);
+  watch.reload();
+  expect(loads).toEqual([undefined, undefined]);
+  // Stayed again, then moves to another page.
+  watch.resume();
+  watch.resume();
+  let move: ((event: NavigationEvent) => void) | undefined;
+  watch.follow({
+    subscribe: (_type, fn) => {
+      move = fn;
+      return () => {};
+    },
+    history: {},
+  });
+  move?.({ fromLocation: {}, pathChanged: true });
+  expect(loads).toEqual([undefined, undefined, undefined]);
+  expect(reloading).toEqual([true, false, true, false, true]);
+});
+
+test("a chunk's reload that did not happen leaves the error to the screen", async () => {
+  const chunk = new TypeError("Failed to fetch dynamically imported module: /assets/x.js");
+  const { watch } = tab({ live: "a" });
+  let told = 0;
+  watch.subscribeToReload(() => told++);
+  expect(await watch.recover(chunk)).toBe(true);
+  expect(watch.isReloading()).toBe(true);
+  watch.resume();
+  expect(watch.isReloading()).toBe(false);
+  expect(told).toBe(2);
+});
+
 test("an error screen reloads onto a newer build for a missing chunk, not for another error", async () => {
   const chunk = new TypeError("Failed to fetch dynamically imported module: /assets/x.js");
   const replaced = tab({ live: "b" });
