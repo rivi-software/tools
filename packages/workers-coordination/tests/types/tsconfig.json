@@ -1,0 +1,7 @@
+{
+  // A Worker that uses the package, type-checked against @cloudflare/workers-types rather than
+  // src/cloudflare-workers.d.ts (which is not part of this program), as an app's would be.
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": { "types": ["@cloudflare/workers-types"] },
+  "include": ["."]
+}

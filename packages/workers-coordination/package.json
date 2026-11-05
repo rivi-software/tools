@@ -1,0 +1,39 @@
+{
+  "name": "@rivi-software/workers-coordination",
+  "version": "0.1.0",
+  "description": "Two Durable Objects for Cloudflare Workers, each with a typed client: a rate limit with one count per key across every location and a window of any length, and a lease lock that one caller holds at a time and that frees itself when its holder crashes",
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "durable-objects",
+    "rate-limit",
+    "rate-limiter",
+    "lock",
+    "lease",
+    "mutex"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit && tsc -p tests/types --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261102.1",
+    "miniflare": "5.20261102.0-beta"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rivi-software/tools.git",
+    "directory": "packages/workers-coordination"
+  },
+  "homepage": "https://github.com/rivi-software/tools/tree/main/packages/workers-coordination#readme",
+  "bugs": "https://github.com/rivi-software/tools/issues",
+  "publishConfig": { "access": "public" }
+}
