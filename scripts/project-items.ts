@@ -4,13 +4,14 @@
  * one starts in.
  */
 
-/** An open issue or pull request, as the search returns it. */
+/** An issue or a pull request, as GitHub returns it now. */
 export interface Item {
   __typename: "Issue" | "PullRequest";
   id: string;
   number: number;
   title: string;
   url: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
   /** Pull requests only. */
   isDraft?: boolean;
   /** null when the account is gone. */
@@ -31,11 +32,26 @@ export function searchQuery(owner: string, project: number): string {
 }
 
 /**
- * Whether the item goes on the project: everything but what a bot opened, such as Dependabot's
- * updates, the release pull request and RIVI Bot's housekeeping reports.
+ * The project's open cards that have no Status: one whose Status could not be set when it was
+ * added, or one someone added by hand.
  */
-export function belongsOnProject(item: Item): boolean {
-  return item.author?.__typename !== "Bot";
+export const MISSING_STATUS_QUERY = "no:status is:open";
+
+/**
+ * Why the item stays off the project, or undefined when it goes on. The search index can lag
+ * behind an item that closed a moment ago, so this reads the state GitHub returns with the item.
+ * What a bot opened stays off, such as Dependabot's updates, the release pull request and RIVI
+ * Bot's housekeeping reports.
+ */
+export function leaveOffReason(item: Item): string | undefined {
+  if (item.state !== "OPEN") return `it is ${item.state.toLowerCase()}`;
+  if (item.author?.__typename === "Bot") return `${item.author.login} opened it`;
+  return undefined;
+}
+
+/** Whether a card's content is an issue or a pull request, rather than a draft issue. */
+export function isIssueOrPullRequest(content: { __typename: string } | null): content is Item {
+  return content?.__typename === "Issue" || content?.__typename === "PullRequest";
 }
 
 /** An issue waits for triage; a pull request is in review, or in progress while a draft. */

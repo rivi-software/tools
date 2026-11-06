@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  belongsOnProject,
+  MISSING_STATUS_QUERY,
+  isIssueOrPullRequest,
+  leaveOffReason,
   searchQuery,
   startingStatus,
   statusOptionIds,
@@ -14,6 +16,7 @@ function item(overrides: Partial<Item> = {}): Item {
     number: 57,
     title: "deploy-watch: a reload that does not happen leaves the tab stuck",
     url: "https://github.com/rivi-software/tools/issues/57",
+    state: "OPEN",
     author: { __typename: "User", login: "someone" },
     repository: { nameWithOwner: "rivi-software/tools" },
     ...overrides,
@@ -28,22 +31,50 @@ describe("searchQuery", () => {
   });
 });
 
-describe("belongsOnProject", () => {
-  it("takes what a person opened", () => {
-    expect(belongsOnProject(item())).toBe(true);
-    expect(belongsOnProject(item({ __typename: "PullRequest", isDraft: false }))).toBe(true);
+describe("MISSING_STATUS_QUERY", () => {
+  it("asks for the open cards that have no Status", () => {
+    expect(MISSING_STATUS_QUERY).toBe("no:status is:open");
+  });
+});
+
+describe("leaveOffReason", () => {
+  it("takes an open item a person opened", () => {
+    expect(leaveOffReason(item())).toBeUndefined();
+    expect(leaveOffReason(item({ __typename: "PullRequest", isDraft: false }))).toBeUndefined();
   });
 
   it("takes an item whose author's account is gone", () => {
-    expect(belongsOnProject(item({ author: null }))).toBe(true);
+    expect(leaveOffReason(item({ author: null }))).toBeUndefined();
   });
 
   it("leaves off what a bot opened", () => {
     const bot = { __typename: "Bot", login: "github-actions" };
-    expect(belongsOnProject(item({ __typename: "PullRequest", author: bot }))).toBe(false);
-    expect(belongsOnProject(item({ author: { __typename: "Bot", login: "rivi-bot" } }))).toBe(
-      false,
+    expect(leaveOffReason(item({ __typename: "PullRequest", author: bot }))).toBe(
+      "github-actions opened it",
     );
+    expect(leaveOffReason(item({ author: { __typename: "Bot", login: "rivi-bot" } }))).toBe(
+      "rivi-bot opened it",
+    );
+  });
+
+  // The search index still listed tools#83 as open six seconds after it merged.
+  it("leaves off an item that closed or merged after the search indexed it", () => {
+    expect(leaveOffReason(item({ __typename: "PullRequest", state: "MERGED" }))).toBe(
+      "it is merged",
+    );
+    expect(leaveOffReason(item({ state: "CLOSED" }))).toBe("it is closed");
+  });
+});
+
+describe("isIssueOrPullRequest", () => {
+  it("is true for an issue or a pull request", () => {
+    expect(isIssueOrPullRequest(item())).toBe(true);
+    expect(isIssueOrPullRequest(item({ __typename: "PullRequest" }))).toBe(true);
+  });
+
+  it("is false for a draft issue, or content the token cannot see", () => {
+    expect(isIssueOrPullRequest({ __typename: "DraftIssue" })).toBe(false);
+    expect(isIssueOrPullRequest(null)).toBe(false);
   });
 });
 
