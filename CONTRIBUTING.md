@@ -206,9 +206,9 @@ npm adds a trusted publisher only to a package that already exists, so a maintai
 
 GitHub enforces the repository's rulesets; [`.github/rulesets/`](.github/rulesets) holds them and is their source of truth.
 
-- **`main.json`.** `main` changes only through pull requests, squashed, once the `verify` check passes: CI's job that passes when every Node version passed, and the code owner approves. Nobody else pushes to `main` directly, force-pushes or deletes it.
+- **`main.json`.** `main` changes only through pull requests, squashed, once the `verify` check passes: CI's job that passes when every Node version passed, and the code owner approves. Nobody pushes to `main` directly, force-pushes or deletes it.
   - [`.github/CODEOWNERS`](.github/CODEOWNERS) makes `rikvisser-dev` the owner of every file, so every pull request needs their approval. A review by anyone else, rivi-bot's included, is advice.
-  - `rikvisser-dev` can bypass the rules. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own.
+  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `verify` included, so wait for `verify` first.
   - A branch need not be up to date with `main` before it merges. Without a merge queue, that would rerun CI on every open pull request after each merge.
 - **`release-tags.json`.** A release tag (`@rivi-software/<name>@<version>`, `rivi-bot-v*`) is created once and is never moved or deleted, because users pin to it.
 
