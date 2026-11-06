@@ -19,8 +19,7 @@ jobs:
     # npm trusted publishing needs a GitHub-hosted runner.
     runs-on: ubuntu-24.04
     permissions:
-      contents: write # the release commit and tags
-      pull-requests: write # the "Version packages" pull request
+      contents: read
       id-token: write # npm trusted publishing and provenance
     steps:
       - name: Checkout
@@ -45,6 +44,20 @@ jobs:
       - name: Verify
         run: pnpm run verify
 
+      # RIVI Bot, not github-actions, writes the version commit, the "Version packages" pull
+      # request, the tags and the GitHub releases, through the GitHub API, so its commits are
+      # signed. CI starts on the App's pushes by itself; on GITHUB_TOKEN's it waits for a
+      # maintainer to approve the run. Minted after Verify, so the hour-long token outlasts the
+      # publish.
+      - name: Mint the RIVI Bot token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}
+          permission-contents: write # the version commit, tags and GitHub releases
+          permission-pull-requests: write # the "Version packages" pull request
+
       - name: Open the version pull request or publish
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
@@ -52,7 +65,7 @@ jobs:
           publish-script: pnpm run release
           pr-title: "chore: version packages"
           commit-message: "chore: version packages"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.app-token.outputs.token }}
 
   github-packages:
     name: Copy to GitHub Packages
