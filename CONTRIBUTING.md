@@ -67,7 +67,7 @@ Work on a branch in your fork. One pull request makes one change, to one package
 
 1. **CI** runs `verify` on Node 22, 24 and 26, and its `verify` check must pass before the pull request can merge. Until a first pull request of yours has merged here, GitHub waits for a maintainer to approve each run before it starts.
 2. **Review.** A maintainer reviews the pull request. They may also ask [rivi-bot](rivi-bot), an automated reviewer that runs Claude, to review it, and it then reviews each later push as well; it only reads the change and comments. Its comments are advice: fix what is right, and reply where it is wrong.
-3. **Merge.** A maintainer squash-merges the pull request once it is reviewed and `verify` passes.
+3. **Merge.** A maintainer squash-merges the pull request once the code owner ([`.github/CODEOWNERS`](.github/CODEOWNERS)) approves it and `verify` passes.
 4. **Release.** The next release of the package publishes your changeset to npm (see [Changes and releases](#changes-and-releases)).
 
 ### License
@@ -206,8 +206,9 @@ npm adds a trusted publisher only to a package that already exists, so a maintai
 
 GitHub enforces the repository's rulesets; [`.github/rulesets/`](.github/rulesets) holds them and is their source of truth.
 
-- **`main.json`.** `main` changes only through pull requests, squashed, once the `verify` check passes: CI's job that passes when every Node version passed. Nobody pushes to `main` directly, force-pushes or deletes it, and nobody bypasses the rules.
-  - No approval is required. A review, rivi-bot's included, is advice.
+- **`main.json`.** `main` changes only through pull requests, squashed, once the `verify` check passes: CI's job that passes when every Node version passed, and the code owner approves. Nobody pushes to `main` directly, force-pushes or deletes it.
+  - [`.github/CODEOWNERS`](.github/CODEOWNERS) makes `rikvisser-dev` the owner of every file, so every pull request needs their approval. A review by anyone else, rivi-bot's included, is advice.
+  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `verify` included, so wait for `verify` first.
   - A branch need not be up to date with `main` before it merges. Without a merge queue, that would rerun CI on every open pull request after each merge.
 - **`release-tags.json`.** A release tag (`@rivi-software/<name>@<version>`, `rivi-bot-v*`) is created once and is never moved or deleted, because users pin to it.
 

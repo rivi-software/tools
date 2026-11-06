@@ -1,0 +1,3 @@
+# Who approves a pull request to main. The main ruleset (.github/rulesets/main.json) requires an
+# approval from the owner of every file the pull request changes.
+* @rikvisser-dev
