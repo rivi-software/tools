@@ -8,7 +8,7 @@ afterEach(() => {
 /**
  * A stand-in for a browser tab on build `id`, whose `/build.json` answers `live` and whose build's
  * own copy answers `own` (a 404 without one), with the package loaded fresh and the watch not
- * started yet.
+ * started yet. While `network.offline`, every request fails.
  */
 async function openTab({
   id = "a",
@@ -17,6 +17,7 @@ async function openTab({
 } = {}) {
   const loads: (string | undefined)[] = [];
   const fetched: string[] = [];
+  const network = { offline: false };
   const later: (() => void)[] = [];
   const stored = new Map<string, string>();
   const tabWindow = Object.assign(new EventTarget(), {
@@ -41,6 +42,7 @@ async function openTab({
   vi.stubGlobal("document", page);
   vi.stubGlobal("fetch", async (url: string) => {
     fetched.push(url);
+    if (network.offline) throw new TypeError("Failed to fetch");
     if (url === "/build.json") return Response.json(live);
     return own ? Response.json(own) : new Response("Not found", { status: 404 });
   });
@@ -53,6 +55,7 @@ async function openTab({
     loads,
     fetched,
     later,
+    network,
     dispatch: (type: string, fields: Record<string, unknown> = {}) =>
       tabWindow.dispatchEvent(Object.assign(new Event(type), fields)),
     /** Starts the watch and waits until the tab knows `b` is live. */
@@ -109,6 +112,24 @@ test("the first read waits until the browser is idle, where it can tell", async 
   expect(tab.later).toEqual([]);
   idle.forEach((callback) => callback());
   await vi.waitFor(() => expect(tab.fetched).toEqual(["/build.json"]));
+});
+
+test("back online right after a read that failed, the tab reads /build.json again", async () => {
+  const tab = await openTab();
+  tab.network.offline = true;
+  tab.startDeployWatch();
+  for (const callback of tab.later.splice(0)) callback();
+  expect(tab.fetched).toEqual(["/build.json"]);
+  // The failed read settles.
+  await new Promise((resolve) => setTimeout(resolve));
+  // Focus within the minute waits for it, as before.
+  tab.dispatch("focus");
+  expect(tab.fetched).toEqual(["/build.json"]);
+  tab.network.offline = false;
+  tab.dispatch("online");
+  tab.dispatch("focus");
+  await vi.waitFor(() => expect(tab.isNewBuildLive()).toBe(true));
+  expect(tab.fetched).toEqual(["/build.json", "/build.json", "/assets/deploy-watch-a.json"]);
 });
 
 test("a build whose id is not a plain file name has no copy to read", async () => {

@@ -89,6 +89,40 @@ test("a tab's own activity checks at most once a minute; a failed chunk checks a
   expect(state.fetches).toBe(2);
 });
 
+test("back online, a tab checks at once if its last check got no answer", async () => {
+  const { watch, state, advance } = tab({ live: new Error("offline") });
+  advance(CHECK_SPACING_MS);
+  expect(await watch.check()).toBe(false);
+  expect(state.fetches).toBe(1);
+  // Back online seconds later, with a deploy live meanwhile; a burst of events shares one request.
+  state.live = "b";
+  advance(5_000);
+  expect(await Promise.all([watch.check({ retry: true }), watch.check({ retry: true })])).toEqual([
+    true,
+    true,
+  ]);
+  expect(state.fetches).toBe(2);
+  // That check got an answer, so the next one waits its minute again.
+  advance(5_000);
+  expect(await watch.check({ retry: true })).toBe(true);
+  expect(state.fetches).toBe(2);
+});
+
+test("back online after a check that got an answer, or none that was no failure, the minute holds", async () => {
+  for (const live of ["a", null] as const) {
+    const { watch, state, advance } = tab({ live });
+    advance(CHECK_SPACING_MS);
+    await watch.check();
+    advance(5_000);
+    expect(await watch.check({ retry: true })).toBe(false);
+    expect({ live, fetches: state.fetches }).toEqual({ live, fetches: 1 });
+  }
+  // The page has just loaded its build: nothing failed yet.
+  const fresh = tab({ live: "b" });
+  expect(await fresh.watch.check({ retry: true })).toBe(false);
+  expect(fresh.state.fetches).toBe(0);
+});
+
 test("a different live build is new, tells the listeners once, and is not fetched again", async () => {
   const { watch, state } = tab({ live: "b" });
   let told = 0;
