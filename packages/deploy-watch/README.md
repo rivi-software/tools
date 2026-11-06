@@ -106,7 +106,7 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
 - **The page's id.** `BuildMeta` renders `<meta name="deploy-watch-build">` in the document's head on the server. In the browser it reads the tag back, so hydration matches.
 - **The check.** `startDeployWatch()` reads `build.json` (`no-store`, without cookies, giving up after 10 s):
   - once soon after the page loads, when the browser is idle (or after 2 s where it cannot say)
-  - when the tab comes back into view, gets focus or comes back online, at most once a minute
+  - when the tab comes back into view, gets focus or comes back online, at most once a minute; back online after a read that got no answer (offline, or no answer within 10 s), it reads at once
   - every ten minutes while it is visible
   - after a back/forward-cache restore
   - at once when Vite's preload helper reports a chunk that failed (`vite:preloadError`)
@@ -196,7 +196,7 @@ From `@rivi-software/deploy-watch` (browser and server; on the server, and in a 
 | `parseBuildFile(body)` | The `BuildFile` a parsed `build.json` describes (`id`, and `client` and `modules` when it has them), or `null` |
 | `createDeployWatch(deps)` | The watch over injected dependencies (`current`, `fetchLive`, `fetchOwn?`, `now`, `storage`, `load`), for tests and other hosts |
 | `BUILD_META_NAME`, `BUILD_FILE` | `deploy-watch-build` and `/build.json` |
-| `CHECK_SPACING_MS`, `CHECK_INTERVAL_MS` | A minute between checks the tab's own activity starts; ten minutes between checks while it is visible |
+| `CHECK_SPACING_MS`, `CHECK_INTERVAL_MS` | A minute between checks the tab's own activity starts, unless it comes back online after a check that got no answer; ten minutes between checks while it is visible |
 | `RELOADED_FOR_KEY`, `CHUNK_RETRY_KEY`, `LOOP_GUARD_MS` | The session storage keys of the [loop guard](#how-it-works), and how long it holds: ten minutes |
 | Types | `BuildFile`, `StartOptions`, `DeployWatch`, `DeployWatchDeps`, `NavigationEvent`, `NavigationEvents` |
 

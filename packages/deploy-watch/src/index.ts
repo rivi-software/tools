@@ -5,8 +5,9 @@
  * - The page's build id is in its `<meta name="deploy-watch-build">` (the server writes it,
  *   `BuildMeta` in `./react`); the live build's is in `/build.json` (the Vite plugin, `./vite`,
  *   writes it into the static assets, so reading it costs no server request).
- * - `startDeployWatch` reads `/build.json` when the tab comes back into view or gets focus (at most
- *   once a minute), every ten minutes while it is visible, and at once when a chunk fails to load.
+ * - `startDeployWatch` reads `/build.json` when the tab comes back into view, gets focus or comes
+ *   back online (at most once a minute, unless the last read got no answer and the browser is
+ *   back online), every ten minutes while it is visible, and at once when a chunk fails to load.
  * - Once a newer build is live, the next move to another page loads the whole page
  *   (`followNewBuild`), after the app's unsaved-work guards have run; a notice can offer the
  *   reload (`useNewBuildNotice` in `./react`), and once dismissed waits for a later build; and an
@@ -41,7 +42,10 @@ export const BUILD_META_NAME = "deploy-watch-build";
  * default `base`; the Vite plugin tells the browser where it is under another one.
  */
 export const BUILD_FILE = "/build.json";
-/** The fewest milliseconds between two checks a tab's own activity starts; a failed chunk checks at once. */
+/**
+ * The fewest milliseconds between two checks a tab's own activity starts. A failed chunk checks
+ * at once, and so does coming back online after a check that got no answer.
+ */
 export const CHECK_SPACING_MS = 60_000;
 /** How often a visible tab checks on its own. */
 export const CHECK_INTERVAL_MS = 10 * 60_000;
@@ -126,6 +130,8 @@ export function createDeployWatch({
   // The page has just loaded the build it runs, so the first check waits like any other.
   let lastCheck = loadedAt;
   let asked = false;
+  // Whether the last check's request failed, so it got no answer (offline): it saw no deploy.
+  let unanswered = false;
   // The page's own build, as `/build.json` described it while it was live, or its own copy did.
   let own: BuildFile | null = null;
   let askedOwn = false;
@@ -182,19 +188,28 @@ export function createDeployWatch({
   }
 
   /**
-   * Whether a newer build is live. `force` skips the spacing, for a chunk that failed. Once a
-   * newer build is live, it stays new for the tab, and later checks keep reading `/build.json`
-   * for a deploy after it, which may change another module.
+   * Whether a newer build is live. `force` skips the spacing, for a chunk that failed; `retry`
+   * skips it only when the last check got no answer, for a browser back online. A check under
+   * way answers every call meanwhile. Once a newer build is live, it stays new for the tab, and
+   * later checks keep reading `/build.json` for a deploy after it, which may change another module.
    */
-  function check({ force = false }: { force?: boolean } = {}): Promise<boolean> {
+  function check({
+    force = false,
+    retry = false,
+  }: { force?: boolean; retry?: boolean } = {}): Promise<boolean> {
     // A chunk that failed on a page a newer build replaced needs no answer: the page reloads.
     if (live && force) return Promise.resolve(true);
     if (pending) return pending;
-    if (!force && now() - lastCheck < CHECK_SPACING_MS) return Promise.resolve(live !== null);
+    if (!force && !(retry && unanswered) && now() - lastCheck < CHECK_SPACING_MS)
+      return Promise.resolve(live !== null);
     lastCheck = now();
     asked = true;
+    unanswered = false;
     pending = fetchLive()
-      .catch(() => null)
+      .catch(() => {
+        unanswered = true;
+        return null;
+      })
       .then(async (answer) => {
         let changed = false;
         // The live file names the page's own build until a deploy replaces it; after one, the
@@ -474,7 +489,8 @@ export function startDeployWatch({ buildFile }: StartOptions = {}): void {
     if (visible()) void tab.check();
   });
   window.addEventListener("focus", () => void tab.check());
-  window.addEventListener("online", () => void tab.check());
+  // Back online, a check that failed offline less than a minute ago saw no deploy: check again.
+  window.addEventListener("online", () => void tab.check({ retry: true }));
   // A reload can leave the page where it is: the user stays at its unsaved-work prompt. A key or
   // pointer pressed after the reload started shows the page is still in use; during a slow reload
   // it only lets the user start it again, which the browser takes as a new navigation. A held key
