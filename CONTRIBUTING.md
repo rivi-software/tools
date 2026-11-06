@@ -189,6 +189,8 @@ A change to a published package comes with a changeset ([Making the change](#mak
 
 On `main`, the release workflow ([`.github/workflows/release.yml`](.github/workflows/release.yml)) keeps a "Version packages" pull request open while changesets wait. Merging it publishes every version npm does not have yet, through [trusted publishing](https://docs.npmjs.com/trusted-publishers) with provenance, and tags each release.
 
+RIVI Bot, [the App above](#reviews-by-rivi-bot), opens and updates that pull request, and writes the tags and GitHub releases, with a token the workflow mints from the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret. The App needs **Contents: write** and **Pull requests: write**. Because the App pushes the commits, CI starts on the pull request by itself; on commits from the workflow's `GITHUB_TOKEN`, it waits for a maintainer to approve the run.
+
 The workflow's next job copies to GitHub Packages every release that npm has and GitHub Packages lacks, with [`scripts/mirror-github-packages.ts`](scripts/mirror-github-packages.ts) and the job's `GITHUB_TOKEN`. It publishes npm's own tarball once it matches the integrity npm lists, so both registries serve the same bytes. It copies releases oldest first, and a run catches up on whatever an earlier one missed, so it needs no backfill by hand: re-run the job to retry. GitHub Packages has no `npm dist-tag`, so each copy is published with a tag that ends up where npm's points; `node scripts/mirror-github-packages.ts --dry-run` lists the copies and their tags. GitHub Packages links each package to this repository through the `repository` field, and takes its access from the repository.
 
 #### The first release of a new package
