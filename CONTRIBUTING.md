@@ -177,6 +177,12 @@ The options for the scope and the topics are the repository's labels, and Clef d
 
 The issue labeler is off until the `RIVI_BOT_AI_ENABLED` variable is `true`. It needs the `CLOUDFLARE_ACCOUNT_ID` variable and the `CLOUDFLARE_AI_API_TOKEN` secret, a Cloudflare API token with Workers AI Read; and the `CLOUDFLARE_AI_GATEWAY_TOKEN` secret, with AI Gateway Run, unless the first token has that too. Clef's calls go through the authenticated AI Gateway `github-rivi-tools`, which logs them (an issue is public anyway), with a spend limit of $5 a month; a call costs well under a cent. To label an issue that opened before, or again, run the workflow by hand with its number; a run by hand adds no `needs-triage`.
 
+### The open-source project
+
+The organization's open issues and pull requests in its public repositories, this one and every one after it, are on one public project: [RIVI Open Source](https://github.com/orgs/rivi-software/projects/2). Its Status runs Triage → Backlog → Todo → In Progress → In Review → Done.
+
+[`oss-project.yml`](.github/workflows/oss-project.yml) adds them, as the App above, which needs **Organization → Projects: Read and write**. It runs [`scripts/add-to-project.ts`](scripts/add-to-project.ts) every half hour, when an issue or a pull request opens here, and by hand. A search finds the items that are not on the project yet, so a new public repository needs nothing to take part. An issue starts in Triage, a pull request in In Review and a draft in In Progress. What a bot opened stays off, such as the release pull request and Dependabot's, and so does an item that closed before the run read it. Each run also gives a starting Status to every open card that has none: one whose Status could not be set when it was added, or one added by hand. An item that fails does not stop the others; the run fails at the end, and the next one tries again. The project's own workflows move the cards from there. To take a card off the board, archive it: the next run adds a deleted card again.
+
 ### Changes and releases
 
 A change to a published package comes with a changeset ([Making the change](#making-the-change)). A new package needs none; its first version is the one in its `package.json`.
