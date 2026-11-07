@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/d1-migrations",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "D1 migrations from inside a Worker, for databases an app creates at runtime: the same files, order and d1_migrations table as wrangler d1 migrations apply, and a journal of hashes that fails CI when an applied migration is edited",
   "keywords": [
     "cloudflare",
