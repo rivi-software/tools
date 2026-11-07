@@ -197,8 +197,8 @@ export type RawMail = {
   raw: string;
   /**
    * Headers SES carries above `raw` that Email Service's allowlist refuses (`Autocrypt`): the binding sends the
-   * message without them. A value may be folded (CRLF followed by a space or tab); anything else with CR or LF is
-   * refused.
+   * message without them. A value may be folded (CRLF, a space or tab, then more than white space); anything else
+   * with CR or LF is refused.
    */
   sesOnlyHeaders?: Record<string, string>;
   /** SES message tags, as in `Mail`; the binding has none and drops them. */
