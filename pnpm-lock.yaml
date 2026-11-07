@@ -268,8 +268,8 @@ importers:
   packages/workers-bundle-check:
     dependencies:
       ignore:
-        specifier: ^7.0.14
-        version: 7.0.14
+        specifier: ^5.3.2
+        version: 5.3.2
       minimatch:
         specifier: ^11.0.3
         version: 11.0.3
@@ -1990,8 +1990,8 @@ packages:
     resolution: {integrity: sha512-Z+8unD6em/MJwyrkWQ2M3wygRGI1+MztbutiNwk1DCuEPXOZRWGjtcMPZYP1exY9iNZMhd7ZOSMQSo9WYtiQRw==}
     hasBin: true
 
-  ignore@7.0.14:
-    resolution: {integrity: sha512-wCBiZ77u1tuWde6G/nfOtLaCTYcFDU5yCzARzK10y+rLhzYoL7a7yEemcopcc2Mzow7gZOIjnV2ym1NYmdiJOQ==}
+  ignore@5.3.2:
+    resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
     engines: {node: '>= 4'}
 
   import-meta-resolve@4.2.0:
@@ -4041,7 +4041,7 @@ snapshots:
 
   human-id@4.2.2: {}
 
-  ignore@7.0.14: {}
+  ignore@5.3.2: {}
 
   import-meta-resolve@4.2.0: {}
 
