@@ -7,6 +7,7 @@ import {
 import { cloudflare, type CloudflareSendEmailBinding } from "@opencoredev/email-sdk/cloudflare";
 import { ses } from "@opencoredev/email-sdk/ses";
 import { parseMailAddress } from "./address.js";
+import { signAwsRequest } from "./sigv4.js";
 
 // The SDK reports every client and send to its maker's PostHog unless told not to. Off for the whole process,
 // clients that other code creates included; every client here is created with `telemetry: false` as well.
@@ -121,10 +122,23 @@ export function canSendMail(env: MailEnv): boolean {
  * transactional mail only.
  */
 export async function sendMail(env: MailEnv, mail: Mail): Promise<SentMail> {
+  return sendThrough(
+    env,
+    (config) => sendWithSes(config, mail),
+    (binding) => sendWithBinding(binding, mail),
+  );
+}
+
+/** The transport `sendMail` and `sendRawMail` both choose, and the fallback from SES to the binding. */
+async function sendThrough(
+  env: MailEnv,
+  withSes: (config: SesConfig) => Promise<SentMail>,
+  withBinding: (binding: EmailBinding) => Promise<SentMail>,
+): Promise<SentMail> {
   const config = sesConfig(env);
   if (config) {
     try {
-      return await sendWithSes(config, mail);
+      return await withSes(config);
     } catch (err) {
       if (!(err instanceof MailError && err.status !== undefined && env.EMAIL)) throw err;
       // The code and status only: SES's message can name the recipient.
@@ -137,7 +151,7 @@ export async function sendMail(env: MailEnv, mail: Mail): Promise<SentMail> {
     throw new MailError("No mail transport: neither Amazon SES nor the EMAIL binding is set up.", {
       transport: "email-service",
     });
-  return sendWithBinding(env.EMAIL, mail);
+  return withBinding(env.EMAIL);
 }
 
 /** Sends through Amazon SES (API v2) alone; `configurationSet` names the set whose event destinations see it. */
@@ -171,6 +185,157 @@ export async function sendWithBinding(binding: EmailBinding, mail: Mail): Promis
     headers: mail.headers && Object.entries(mail.headers).map(([name, value]) => ({ name, value })),
   });
   return { transport: "email-service", id: result.id, messageId: result.id };
+}
+
+/** A message already written out in full, for `sendRawMail`, `sendRawWithSes` or `sendRawWithBinding`. */
+export type RawMail = {
+  /** The envelope sender: a bare address on a domain the transport may send from. */
+  from: string;
+  /** The envelope recipients (To, Cc and Bcc together), bare addresses. The message itself names no Bcc. */
+  recipients: readonly string[];
+  /** The RFC 5322 message: its headers, a blank line, the body; CRLF line ends, 7-bit. */
+  raw: string;
+  /**
+   * Headers SES carries above `raw` that Email Service's allowlist refuses (`Autocrypt`): the binding sends the
+   * message without them. A value may be folded (CRLF followed by a space or tab); anything else with CR or LF is
+   * refused.
+   */
+  sesOnlyHeaders?: Record<string, string>;
+  /** SES message tags, as in `Mail`; the binding has none and drops them. */
+  tags?: Record<string, string>;
+};
+
+/**
+ * Sends a message the caller wrote out in full, such as signed or encrypted PGP/MIME, which has to go out byte for
+ * byte as it was written; `sendMail` builds its message from fields and cannot carry one. The transport is chosen
+ * as `sendMail` chooses it: SES when the Worker holds its key, else the `EMAIL` binding, and the binding when SES
+ * answers with a refusal, never after an SES call that got no answer.
+ */
+export async function sendRawMail(env: MailEnv, mail: RawMail): Promise<SentMail> {
+  // Refused whichever transport is set up, so a bad header fails where only the binding sends (local development)
+  // as it would through SES.
+  sesHeaderLines(mail.sesOnlyHeaders);
+  return sendThrough(
+    env,
+    (config) => sendRawWithSes(config, mail),
+    (binding) => sendRawWithBinding(binding, mail),
+  );
+}
+
+/**
+ * Sends a raw message through Amazon SES (API v2) alone, `sesOnlyHeaders` above the message; `configurationSet`
+ * names the set whose event destinations see it.
+ */
+export async function sendRawWithSes(
+  config: SesConfig,
+  mail: RawMail,
+  options: { configurationSet?: string } = {},
+): Promise<SentMail> {
+  const headerLines = sesHeaderLines(mail.sesOnlyHeaders);
+  needsRecipients(mail, "ses");
+  const url = new URL("/v2/email/outbound-emails", `https://email.${config.region}.amazonaws.com`);
+  const body = JSON.stringify({
+    FromEmailAddress: mail.from,
+    // The envelope: SES delivers to these and reads no recipient from the message's headers.
+    Destination: { ToAddresses: mail.recipients },
+    Content: { Raw: { Data: base64(headerLines + mail.raw) } },
+    ConfigurationSetName: options.configurationSet?.trim() || undefined,
+    EmailTags: mail.tags && Object.entries(mail.tags).map(([Name, Value]) => ({ Name, Value })),
+  });
+  let answer: { MessageId?: unknown };
+  try {
+    // The headers the Email SDK's SES adapter sends, and no timeout, as it has none.
+    const headers = await signAwsRequest(
+      { method: "POST", url, headers: { "content-type": "application/json" }, body },
+      { ...config, service: "ses" },
+    );
+    const res = await sesFetch(url, { method: "POST", headers, body });
+    // SES took the message once it answered with success, so a body that does not read is no failure.
+    answer = (await res.json().catch(() => ({}))) as { MessageId?: unknown };
+  } catch (err) {
+    throw mailError(err, "ses");
+  }
+  const id = typeof answer.MessageId === "string" ? answer.MessageId : null;
+  return { transport: "ses", id, messageId: id ? sesMessageId(config.region, id) : null };
+}
+
+/**
+ * Sends a raw message through Email Service's binding alone. The binding takes raw MIME only as the `EmailMessage`
+ * of `cloudflare:email`, which has one envelope recipient, so the message goes once per recipient, in order, the
+ * same bytes each time and without `sesOnlyHeaders`. Answers the first send's `messageId`.
+ */
+export async function sendRawWithBinding(binding: EmailBinding, mail: RawMail): Promise<SentMail> {
+  needsRecipients(mail, "email-service");
+  // Imported here rather than with the package, so the package still loads outside the Workers runtime.
+  const { EmailMessage } = await import("cloudflare:email").catch((err: unknown) => {
+    throw mailError(err, "email-service");
+  });
+  let first: string | null = null;
+  for (const [sent, to] of mail.recipients.entries()) {
+    let answer: unknown;
+    try {
+      answer = await binding.send(new EmailMessage(mail.from, to, mail.raw) as never);
+    } catch (err) {
+      const error = mailError(err, "email-service");
+      if (sent === 0) throw error;
+      // Counts only, never the addresses: the message reaches logs.
+      throw new MailError(
+        `The EMAIL binding sent the message to ${sent} of ${mail.recipients.length} recipients, then failed` +
+          `${error.code ? ` with ${error.code}` : ""}; sending it again would deliver it twice to those ${sent}.`,
+        { transport: "email-service", code: error.code, cause: err },
+      );
+    }
+    if (sent === 0) {
+      const id = (answer as { messageId?: unknown } | null | undefined)?.messageId;
+      first = typeof id === "string" ? id : null;
+    }
+  }
+  return { transport: "email-service", id: first, messageId: first };
+}
+
+const HEADER_NAME = /^[A-Za-z0-9-]+$/;
+// No CR or LF but in a fold: CRLF, then a space or tab, which continues the header on the next line.
+const HEADER_VALUE = /^(?:[^\r\n]|\r\n[ \t])*$/;
+
+/**
+ * `sesOnlyHeaders` as the lines that go above the message. A line break that is not a fold would end the header
+ * and write headers or a body of its own into the message, so it is refused before anything is sent, and without
+ * a status, which would let the binding send the message instead.
+ */
+function sesHeaderLines(headers: Record<string, string> | undefined): string {
+  let lines = "";
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (!HEADER_NAME.test(name))
+      throw new MailError("A header name in sesOnlyHeaders is not letters, digits and hyphens.", {
+        transport: "ses",
+        code: "validation_error",
+      });
+    if (!HEADER_VALUE.test(value))
+      throw new MailError(
+        `The ${name} header in sesOnlyHeaders has a line break that is not a fold (CRLF, then a space or tab).`,
+        { transport: "ses", code: "validation_error" },
+      );
+    lines += `${name}: ${value}\r\n`;
+  }
+  return lines;
+}
+
+// Without one, SES would read the recipients from the message's headers and the binding would send nothing.
+function needsRecipients(mail: RawMail, transport: MailTransport): void {
+  if (mail.recipients.length === 0)
+    throw new MailError("A raw message needs at least one recipient.", {
+      transport,
+      code: "validation_error",
+    });
+}
+
+/** The UTF-8 bytes of `text` in base64, a slice at a time: a message of megabytes is too many arguments at once. */
+function base64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 async function send(

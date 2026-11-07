@@ -4,7 +4,7 @@
 
 Mail from Cloudflare Workers through [Amazon SES](https://aws.amazon.com/ses/) once a Worker holds SES's key, and through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/)'s `send_email` binding until then and whenever SES refuses a message. One call, `sendMail(env, mail)`, picks the transport, formats the addresses and headers for it, and answers with the `Message-ID` the message went out with, so a reply threads back.
 
-The binding needs no keys and sends from the day a domain is onboarded; SES takes larger messages and list mail, but needs a verified identity, production access and an IAM key first. With both set up, mail keeps going while SES is not ready yet, and when SES refuses a message (an identity not verified yet, a policy that does not allow the address, a throttle) the binding sends it instead. SES goes through the [Email SDK](https://email-sdk.dev/docs/adapters/ses) (`@opencoredev/email-sdk`), which signs SES's API v2 requests with `fetch` and Web Crypto, so the Worker needs no AWS SDK.
+The binding needs no keys and sends from the day a domain is onboarded; SES takes larger messages and list mail, but needs a verified identity, production access and an IAM key first. With both set up, mail keeps going while SES is not ready yet, and when SES refuses a message (an identity not verified yet, a policy that does not allow the address, a throttle) the binding sends it instead. SES goes through the [Email SDK](https://email-sdk.dev/docs/adapters/ses) (`@opencoredev/email-sdk`), which signs SES's API v2 requests with `fetch` and Web Crypto, so the Worker needs no AWS SDK. A message written out in full, such as signed or encrypted PGP/MIME, goes out unchanged through `sendRawMail` ([Raw mail](#raw-mail)).
 
 ## Install
 
@@ -88,6 +88,31 @@ What differs between the two transports, and what the package does about it:
 - **List mail.** Email Service takes transactional mail only, so newsletters and other list mail go through `sendWithSes`, which never falls back.
 - **Idempotency.** Neither has any; a caller that retries can deliver twice.
 
+## Raw mail
+
+`sendMail` hands the transport fields, and the transport writes the message. A message that has to go out byte for byte as it was written, such as PGP/MIME (RFC 3156: `multipart/signed`, `multipart/encrypted`), whose signature covers the bytes of a part, goes through `sendRawMail(env, mail)` instead. It chooses the transport as `sendMail` does, hands a message SES refused to the binding on the same terms, and writes the same `mail.ses_refused` line.
+
+```ts
+import { sendRawMail } from "@rivi-software/workers-mail";
+
+const sent = await sendRawMail(env, {
+  from: "jane@example.com",
+  // To, Cc and Bcc together: the message names no Bcc.
+  recipients: ["bob@example.org", "carol@example.org", "dave@example.org"],
+  // Its headers, a blank line, the body; CRLF line ends, 7-bit.
+  raw,
+  sesOnlyHeaders: { Autocrypt: "addr=jane@example.com; keydata=…" },
+});
+```
+
+- **The envelope.** `from` and `recipients` are bare addresses, and they are where the message goes: neither transport reads a recipient from the message's headers. A Bcc recipient is in `recipients` and nowhere in `raw`, or every recipient would see it. A message without recipients is refused.
+- **SES** takes the message as `Content.Raw` of API v2's `SendEmail`. The Email SDK's adapter sends structured content only, so the package signs this call itself, with Signature Version 4 in Web Crypto. SES writes its own `Message-ID` over the message's, and `SentMail.messageId` names it, as for `sendMail`.
+- **The binding** takes a message written out in full only as the `EmailMessage` of `cloudflare:email`, which has one envelope recipient. So the message goes once per recipient, in order, the same bytes each time, and each send counts as a message against Email Service's limits; `SentMail` names the first send's `messageId`. When a send fails after others went, the `MailError` has the binding's `code` and says how many of how many recipients took the message, counts and never addresses, since it reaches logs: sending it again would deliver it twice to those. The package imports `cloudflare:email` only when the binding sends, so it still loads outside the Workers runtime.
+- **SES-only headers.** Email Service takes only the headers on [its allowlist](https://developers.cloudflare.com/email-service/reference/headers/), so a header it refuses, such as `Autocrypt`, goes in `sesOnlyHeaders`: SES gets it on a line above the message, and the binding gets the message without it. PGP/MIME signs a part and never the message's own headers, so the signature still holds. A value may be folded (CRLF, then a space or tab). A name of anything but letters, digits and hyphens, or a value with any other CR or LF, would write a header or a body of its own into the message, so it is refused before anything is sent, with a `MailError` that has no status, whichever transport is set up.
+- **Tags.** SES gets `tags` as for `sendMail`; the binding drops them.
+
+`sendRawWithSes(config, mail, { configurationSet })` and `sendRawWithBinding(binding, mail)` send through one transport alone, and never fall back.
+
 ## Exports
 
 From `@rivi-software/workers-mail`:
@@ -97,6 +122,9 @@ From `@rivi-software/workers-mail`:
 | `sendMail(env, mail)` | Transactional mail: SES when `env` holds its region and key, else `env.EMAIL`, and `env.EMAIL` when SES refuses the message ([How it works](#how-it-works)). Answers `SentMail`: the `transport`, the provider's `id` and the `messageId` header. |
 | `sendWithSes(config, mail, { configurationSet })` | SES alone, never the binding: list mail, which Email Service does not take, with the configuration set whose event destinations report its bounces and complaints. |
 | `sendWithBinding(binding, mail)` | The binding alone. |
+| `sendRawMail(env, mail)` | A message written out in full (`RawMail`), with `sendMail`'s choice of transport and fallback ([Raw mail](#raw-mail)). |
+| `sendRawWithSes(config, mail, { configurationSet })` | A raw message through SES alone. |
+| `sendRawWithBinding(binding, mail)` | A raw message through the binding alone: one send per recipient. |
 | `canSendMail(env)`, `sesConfig(env)` | Whether a Worker can send at all; SES's region and key, or null while one of them is missing. |
 | `MailError` | A message that was not sent: `transport`, SES's HTTP `status` (absent when SES was not reached or the binding failed), `code` (SES's error type such as `MessageRejected`, or the binding's such as `E_RATE_LIMIT_EXCEEDED`) and `refusedMessage`, true when SES refused the message itself, so that sending it again fails the same way. |
 | `sesError(response)` | The `MailError` for an error answer from SES's API, for calls the Email SDK does not make, such as reading the account's quota with `GetAccount`. |
@@ -104,9 +132,11 @@ From `@rivi-software/workers-mail`:
 | `formatSesAddress(address)` | The address as SES takes it: the name quoted, or MIME-encoded when it is not ASCII. |
 | `fitReferences(value, max = 986)` | A `References` value cut to `max` characters: the first message and the latest. |
 | `sesMessageId(region, id)` | The `Message-ID` header SES gives the message it answered `id` for. |
-| Types | `Mail`, `MailAddress`, `MailAttachment`, `MailEnv`, `MailTransport`, `SentMail`, `SesConfig`, `EmailBinding`. |
+| Types | `Mail`, `RawMail`, `MailAddress`, `MailAttachment`, `MailEnv`, `MailTransport`, `SentMail`, `SesConfig`, `EmailBinding`. |
 
 A `Mail` has `from`, `to` (one address or a list), `cc`, `bcc` and `replyTo`, each address as `jane@example.com`, `Jane <jane@example.com>` or `{ email, name }`; a `subject`; `text` and/or `html`; `headers`; `attachments` as base64 (`disposition` `attachment`, or `inline` with the `contentId` the HTML names as `cid:`); and SES message `tags`.
+
+A `RawMail` has the envelope's `from` and `recipients` as bare addresses, the message as `raw`, `sesOnlyHeaders` and SES message `tags`.
 
 From `@rivi-software/workers-mail/address`:
 
@@ -147,7 +177,7 @@ SES's account-level suppression list (SES → Configuration → Suppression list
 
 ## Testing a Worker that sends
 
-The package's own tests run in Node with Vitest: SES is answered by a spy on the global `fetch`, which the package looks up on each call, and the binding by an object that records what it was handed. A Worker's tests can do the same: leave the three SES values empty and pass an `EMAIL` that records the mail, or set them and spy on `fetch` to answer as SES does ([`tests/mail.test.ts`](https://github.com/rivi-software/tools/blob/main/packages/workers-mail/tests/mail.test.ts) has both).
+The package's own tests run in Node with Vitest: SES is answered by a spy on the global `fetch`, which the package looks up on each call, and the binding by an object that records what it was handed. A Worker's tests can do the same: leave the three SES values empty and pass an `EMAIL` that records the mail, or set them and spy on `fetch` to answer as SES does ([`tests/mail.test.ts`](https://github.com/rivi-software/tools/blob/main/packages/workers-mail/tests/mail.test.ts) has both). Raw mail through the binding needs `cloudflare:email`, which Node lacks: the package's `vitest.config.ts` points it at a stand-in `EmailMessage` that keeps the message readable ([`tests/raw.test.ts`](https://github.com/rivi-software/tools/blob/main/packages/workers-mail/tests/raw.test.ts)).
 
 ## Limits
 
@@ -156,10 +186,11 @@ The package's own tests run in Node with Vitest: SES is answered by a spy on the
 - `References` is fitted for SES alone; Email Service refuses a header value over 2,048 bytes ([Headers](#how-it-works)).
 - Attachments are base64 strings: Email Service's local simulator in `wrangler dev` cannot take an `ArrayBuffer`, and SES wants base64.
 - Through the binding, recipients' display names are dropped.
+- Raw mail through the binding goes once per recipient, and a failure partway leaves it sent to some of them ([Raw mail](#raw-mail)).
 
 ## Development
 
-The tests in `tests/` cover both transports and the fallback between them against a stand-in SES and binding, the addresses and headers each transport takes, the telemetry opt-out (`mail.test.ts`) and the address parser (`address.test.ts`). None of them sends mail. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+The tests in `tests/` cover both transports and the fallback between them against a stand-in SES and binding, the addresses and headers each transport takes, the telemetry opt-out (`mail.test.ts`), raw mail and the Signature Version 4 signer against AWS's own example (`raw.test.ts`) and the address parser (`address.test.ts`). None of them sends mail. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
 
 ## License
 
