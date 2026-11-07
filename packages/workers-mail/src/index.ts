@@ -294,8 +294,9 @@ export async function sendRawWithBinding(binding: EmailBinding, mail: RawMail): 
 }
 
 const HEADER_NAME = /^[A-Za-z0-9-]+$/;
-// No CR or LF but in a fold: CRLF, then a space or tab, which continues the header on the next line.
-const HEADER_VALUE = /^(?:[^\r\n]|\r\n[ \t])*$/;
+// No CR or LF but in a fold: CRLF, then a space or tab, and a line that is more than white space. A line of
+// white space alone is obsolete syntax (RFC 5322 §4.2) that some parsers read as the end of the header.
+const HEADER_VALUE = /^[^\r\n]*(?:\r\n[ \t]+[^\r\n \t][^\r\n]*)*$/;
 
 /**
  * `sesOnlyHeaders` as the lines that go above the message. A line break that is not a fold would end the header

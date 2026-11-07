@@ -209,6 +209,8 @@ describe("sendRawMail", () => {
       { Autocrypt: "addr=a@b\n keydata=x" },
       { Autocrypt: "addr=a@b\r keydata=x" },
       { Autocrypt: "addr=a@b\r\n" },
+      { Autocrypt: "addr=a@b\r\n " },
+      { Autocrypt: "x\r\n \r\n y" },
       { "Auto crypt": "addr=a@b" },
       { "X-A:\r\nBcc": "eve@example.net" },
       { "": "x" },
