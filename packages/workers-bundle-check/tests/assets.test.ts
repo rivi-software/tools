@@ -34,6 +34,10 @@ const ASSETS_IGNORES: Record<string, string | undefined> = {
   negation: "*.map\n!keep.map\n",
   "trailing spaces": "*.map   \n",
   "an escaped leading #": "\\#*\n*.map\n",
+  // Wrangler bundles ignore 5, which reads `!` in a bracket and a POSIX class as plain
+  // characters; ignore 6 and later negate and expand them, and so leave out other assets.
+  "a bracket that starts with !": "[!k]*.map\n",
+  "a POSIX character class": "[[:lower:]]*.map\n",
 };
 
 describe("which assets .assetsignore leaves out", () => {

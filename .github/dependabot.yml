@@ -29,6 +29,10 @@ updates:
       # API that Node 22 lacks; its next major comes with raising that floor.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # workers-bundle-check matches .assetsignore with the ignore major Wrangler bundles (5), so it
+      # leaves out the assets Wrangler does; ignore 6 and later read some patterns differently.
+      - dependency-name: "ignore"
+        update-types: ["version-update:semver-major"]
     groups:
       development:
         dependency-type: development
