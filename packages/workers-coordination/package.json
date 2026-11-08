@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/workers-coordination",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Two Durable Objects for Cloudflare Workers, each with a typed client: a rate limit with one count per key across every location and a window of any length, and a lease lock that one caller holds at a time and that frees itself when its holder crashes",
   "keywords": [
     "cloudflare",
