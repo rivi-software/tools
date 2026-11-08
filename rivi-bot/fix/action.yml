@@ -178,7 +178,17 @@ runs:
         allowed_non_write_users: "*"
         settings: '{"disableAllHooks":true}'
         claude_args: >-
-          --model ${{ inputs.model }} --effort high --max-turns 40 --max-budget-usd 5 --setting-sources user --strict-mcp-config --permission-mode default --add-dir ${{ steps.pr.outputs.dir }} --disallowedTools "Bash,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**),Edit(./.github/**),Edit(./.git/**),Edit(/${{ runner.temp }}/**)" --allowedTools "Read,Glob,Grep,Edit,Write,MultiEdit" --json-schema '{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title","summary"],"additionalProperties":false}'
+          --model ${{ inputs.model }}
+          --effort high
+          --max-turns 40
+          --max-budget-usd 5
+          --setting-sources user
+          --strict-mcp-config
+          --permission-mode default
+          --add-dir ${{ steps.pr.outputs.dir }}
+          --disallowedTools "Bash,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**),Edit(./.github/**),Edit(./.git/**),Edit(/${{ runner.temp }}/**)"
+          --allowedTools "Read,Glob,Grep,Edit,Write,MultiEdit"
+          --json-schema '{"type":"object","properties":{"title":{"type":"string"},"summary":{"type":"string"}},"required":["title","summary"],"additionalProperties":false}'
         prompt: |
           ${{ inputs.thread != '' && 'Do what the review thread in request-thread.json asks' || 'Fix the open review findings' }} on pull request #${{ inputs.pull-request }} in ${{ github.repository }}: branch ${{ steps.pr.outputs.head_ref }} at ${{ steps.pr.outputs.head_sha }}, which is checked out here, shallow. The repository's guides (AGENTS.md, CONTRIBUTING.md and the READMEs, wherever they are) state its conventions. In ${{ steps.pr.outputs.dir }}:
           - findings.json: threads, the review threads nobody has resolved (the file, the line, outdated when the line has changed since, the url, and the comments, oldest first); and last_review, the body of the last review by ${{ inputs.reviewer }}, which may list findings that have no thread

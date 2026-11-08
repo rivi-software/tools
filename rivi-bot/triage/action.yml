@@ -127,7 +127,17 @@ runs:
         allowed_non_write_users: "*"
         settings: '{"disableAllHooks":true}'
         claude_args: >-
-          --model ${{ inputs.model }} --effort medium --max-turns 25 --max-budget-usd 2 --setting-sources user --strict-mcp-config --permission-mode default --add-dir ${{ steps.issue.outputs.dir }} --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)" --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"labels":{"type":"array","items":{"type":"string"}},"duplicates":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"reason":{"type":"string"}},"required":["number","reason"],"additionalProperties":false}},"questions":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"reason":{"type":"string"}},"required":["path","reason"],"additionalProperties":false}},"plan":{"type":"string"},"prompt":{"type":"string"}},"required":["summary","labels","duplicates","questions","files","plan","prompt"],"additionalProperties":false}'
+          --model ${{ inputs.model }}
+          --effort medium
+          --max-turns 25
+          --max-budget-usd 2
+          --setting-sources user
+          --strict-mcp-config
+          --permission-mode default
+          --add-dir ${{ steps.issue.outputs.dir }}
+          --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)"
+          --allowedTools "Read,Glob,Grep"
+          --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"labels":{"type":"array","items":{"type":"string"}},"duplicates":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"reason":{"type":"string"}},"required":["number","reason"],"additionalProperties":false}},"questions":{"type":"array","items":{"type":"string"}},"files":{"type":"array","items":{"type":"object","properties":{"path":{"type":"string"},"reason":{"type":"string"}},"required":["path","reason"],"additionalProperties":false}},"plan":{"type":"string"},"prompt":{"type":"string"}},"required":["summary","labels","duplicates","questions","files","plan","prompt"],"additionalProperties":false}'
         prompt: |
           Triage issue #${{ inputs.issue }} in ${{ github.repository }}, so that a maintainer can act on it quickly. The default branch is checked out here, shallow; read any file in it. Its guides (AGENTS.md, CONTRIBUTING.md and the READMEs, wherever they are) say how the project works. In ${{ steps.issue.outputs.dir }}:
           - issue.json: the issue and its comments

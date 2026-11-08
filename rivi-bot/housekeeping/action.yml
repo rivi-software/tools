@@ -91,7 +91,17 @@ runs:
         allowed_non_write_users: "*"
         settings: '{"disableAllHooks":true}'
         claude_args: >-
-          --model ${{ inputs.model }} --effort medium --max-turns 40 --max-budget-usd 5 --setting-sources user --strict-mcp-config --permission-mode default --add-dir ${{ steps.backlog.outputs.dir }} --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)" --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"overview":{"type":"string"},"duplicates":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"of":{"type":"integer"},"reason":{"type":"string"}},"required":["number","of","reason"],"additionalProperties":false}},"fixed":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"by":{"type":"integer"},"reason":{"type":"string"}},"required":["number","by","reason"],"additionalProperties":false}},"labels":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"labels":{"type":"array","items":{"type":"string"}}},"required":["number","labels"],"additionalProperties":false}}},"required":["overview","duplicates","fixed","labels"],"additionalProperties":false}'
+          --model ${{ inputs.model }}
+          --effort medium
+          --max-turns 40
+          --max-budget-usd 5
+          --setting-sources user
+          --strict-mcp-config
+          --permission-mode default
+          --add-dir ${{ steps.backlog.outputs.dir }}
+          --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)"
+          --allowedTools "Read,Glob,Grep"
+          --json-schema '{"type":"object","properties":{"overview":{"type":"string"},"duplicates":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"of":{"type":"integer"},"reason":{"type":"string"}},"required":["number","of","reason"],"additionalProperties":false}},"fixed":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"by":{"type":"integer"},"reason":{"type":"string"}},"required":["number","by","reason"],"additionalProperties":false}},"labels":{"type":"array","items":{"type":"object","properties":{"number":{"type":"integer"},"labels":{"type":"array","items":{"type":"string"}}},"required":["number","labels"],"additionalProperties":false}}},"required":["overview","duplicates","fixed","labels"],"additionalProperties":false}'
         prompt: |
           Read the backlog of ${{ github.repository }} for its maintainers. The default branch is checked out here, shallow; read any file in it. In ${{ steps.backlog.outputs.dir }}:
           - issues.json: the open issues, with the start of each body
