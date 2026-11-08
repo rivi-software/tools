@@ -5,13 +5,24 @@ export {
   requireEnvMinLength,
   type Env,
 } from "./deploy-env.js";
+
 export {
   assertDeployedBindings,
   type BindingsConfig,
   type DeployedBindingsOptions,
 } from "./deployed-bindings.js";
-export { secretsFromEnv, withSecretsFile, type SecretsFileOptions } from "./secrets-file.js";
-export { checkDeploymentHealth, type HealthCheckOptions } from "./deployment-health.js";
+
+export {
+  secretsFromEnv,
+  withSecretsFile,
+  type SecretsFileOptions,
+} from "./secrets-file.js";
+
+export {
+  checkDeploymentHealth,
+  type HealthCheckOptions,
+} from "./deployment-health.js";
+
 export {
   binPath,
   cloudflareApiToken,
@@ -24,6 +35,7 @@ export {
   type RunOptions,
   type RunResult,
 } from "./process.js";
+
 export {
   CLOUDFLARE_API,
   CloudflareApiError,
@@ -48,6 +60,7 @@ export {
   type WorkerModule,
   type WorkerUpload,
 } from "./cloudflare-api.js";
+
 export {
   ASSET_PATH_PREFIX,
   PREVIOUS_ASSETS_BINDING,
@@ -56,6 +69,7 @@ export {
   type PreviousAssetMetadata,
   type PreviousAssetStore,
 } from "./previous-assets.js";
+
 export {
   RETAIN_DAYS,
   planRetention,

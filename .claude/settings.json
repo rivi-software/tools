@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pnpm exec ultracite fix --hook -A unicorn/catch-error-name -A typescript/consistent-type-definitions -A unicorn/prefer-dom-node-append -A unicorn/prefer-dom-node-dataset -A unicorn/prefer-query-selector -A unicorn/prefer-at -A unicorn/prefer-set-has -A unicorn/prefer-spread -A unicorn/prefer-bigint-literals -A unicorn/prefer-import-meta-properties -A unicorn/prefer-number-coercion -A unicorn/prefer-type-error -A unicorn/prefer-regexp-test -A unicorn/text-encoding-identifier-case -A unicorn/no-useless-undefined -A vitest/prefer-describe-function-title"
+          }
+        ]
+      }
+    ]
+  }
+}

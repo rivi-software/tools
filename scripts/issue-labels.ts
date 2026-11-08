@@ -18,9 +18,12 @@
 
 export type Env = Record<string, string | undefined>;
 
-export type Label = { name: string; description?: string | null };
+export interface Label {
+  name: string;
+  description?: string | null;
+}
 
-export type Issue = {
+export interface Issue {
   number: number;
   title: string;
   body?: string | null;
@@ -31,7 +34,7 @@ export type Issue = {
   pull_request?: unknown;
   /** The organization's issue fields set on it. */
   issue_field_values?: { issue_field_id: number }[] | null;
-};
+}
 
 /** A Clef question: https://developers.cloudflare.com/workers-ai/models/clef/ */
 export type Question =
@@ -39,28 +42,62 @@ export type Question =
   | { type: "choice"; instructions: string; criteria: Record<string, string> }
   | { type: "score"; instructions: string; criteria: string[] };
 
+/** The questions asked about one issue, by question id. */
+export type Questions = Record<string, Question>;
+
 /** Clef's answer to a question of the same type. `score` is probability-weighted, from 0. */
 export type Answer =
   | { type: "noul"; noul: number }
   | { type: "choice"; choice: string; probabilities: Record<string, number> }
   | { type: "score"; score: number };
 
+/** Clef's answers to the questions, by question id. */
+export type Answers = Record<string, Answer>;
+
+/** An answer as Clef returns it, before checkAnswers holds it to its question. */
+export interface RawAnswer {
+  type?: unknown;
+  noul?: unknown;
+  score?: unknown;
+  choice?: unknown;
+  probabilities?: unknown;
+}
+
+/** Clef's answers as they come back, by question id. */
+export type RawAnswers = Record<string, RawAnswer>;
+
 /** One of the organization's single-select issue fields, with its options lowest first. */
-export type IssueField = { id: number; name: string; levels: string[] };
+export interface IssueField {
+  id: number;
+  name: string;
+  levels: string[];
+}
 
 /** One of an issue's timeline events, as GitHub's REST API lists them. */
-export type IssueEvent = { event: string; label?: { name: string } | null };
+export interface IssueEvent {
+  event: string;
+  label?: { name: string } | null;
+}
 
 /** Where the run stands: whether the issue just opened, and the labels someone took off it. */
-export type Context = { opened: boolean; removed: ReadonlySet<string> };
+export interface Context {
+  opened: boolean;
+  removed: ReadonlySet<string>;
+}
+
+/** What Clef reads about the issue: the repository, and the issue as its author wrote it. */
+export interface IssueState {
+  repository: string;
+  issue: { title: string; body: string; labels: string[] };
+}
 
 /** What to change on the issue, and a line for each answer that was asked. */
-export type Plan = {
+export interface Plan {
   labels: string[];
   type: string | null;
   fields: { field: IssueField; value: string }[];
   notes: string[];
-};
+}
 
 export const MODEL = "@cf/cloudflare/clef";
 
@@ -71,15 +108,21 @@ export const GATEWAY = "github-rivi-tools";
 export const THRESHOLDS = { type: 0.6, scope: 0.5, topic: 0.8 };
 
 /** The organization's issue types, and when each applies. */
-export const TYPES: Record<string, string> = {
+export const TYPES = {
   Bug: "Something is broken, or behaves differently from what its README or types say",
   Feature:
     "New behaviour, or a change to existing behaviour, that the users of a package would notice",
   Task: "A chore, refactor, docs, CI, dependency or tooling change that users would not notice",
-};
+} satisfies Record<string, string>;
 
 /** The topic labels Clef may add. `breaking-change` is a maintainer's call, so it is not here. */
-export const TOPICS = ["security", "performance", "documentation", "accessibility", "question"];
+export const TOPICS = [
+  "security",
+  "performance",
+  "documentation",
+  "accessibility",
+  "question",
+];
 
 // The organization's fields (`gh api /orgs/rivi-software/issue-fields`). The app's token may set
 // an issue's field values but not list the organization's fields, so their ids live here.
@@ -124,22 +167,24 @@ const TEAM = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 /** Clef reads up to 64K tokens; a longer body says nothing more about its labels. */
 const MAX_BODY = 16_000;
 
-function labelName(label: Label | string): string {
-  return typeof label === "string" ? label : label.name;
-}
+/** Whether a label is given as its name alone, rather than as an object. */
+const isLabelName = (label: Label | string): label is string =>
+  typeof label === "string";
+
+const labelName = (label: Label | string): string =>
+  isLabelName(label) ? label : label.name;
 
 /** The question id for a topic: ids take letters, digits, `_`, `.` and `-` only. */
-function topicId(topic: string): string {
-  return `topic.${topic.replace(/[^A-Za-z0-9_.-]/g, "-")}`;
-}
+const topicId = (topic: string): string =>
+  `topic.${topic.replaceAll(/[^A-Za-z0-9_.-]/gu, "-")}`;
 
 /**
  * The questions about what the issue lacks: its type, a scope, each topic label the repository
  * has, and each field it has no value for. None when it lacks nothing.
  */
-export function questionsFor(issue: Issue, repoLabels: Label[]): Record<string, Question> {
+export const questionsFor = (issue: Issue, repoLabels: Label[]) => {
   const has = new Set(issue.labels.map(labelName));
-  const questions: Record<string, Question> = {};
+  const questions: Questions = {};
 
   if (!issue.type) {
     questions.type = {
@@ -150,12 +195,19 @@ export function questionsFor(issue: Issue, repoLabels: Label[]): Record<string, 
   }
 
   const scopes = repoLabels.filter((label) => label.name.startsWith("scope:"));
-  if (scopes.length > 1 && ![...has].some((name) => name.startsWith("scope:"))) {
+
+  if (
+    scopes.length > 1 &&
+    ![...has].some((name) => name.startsWith("scope:"))
+  ) {
     questions.scope = {
       type: "choice",
       instructions: "Which part of the repository is this issue about?",
       criteria: Object.fromEntries(
-        scopes.map((label) => [label.name, label.description || label.name.slice(6)]),
+        scopes.map((label) => [
+          label.name,
+          label.description || label.name.slice(6),
+        ])
       ),
     };
   }
@@ -169,7 +221,10 @@ export function questionsFor(issue: Issue, repoLabels: Label[]): Record<string, 
     }
   }
 
-  const set = new Set((issue.issue_field_values ?? []).map((value) => value.issue_field_id));
+  const set = new Set(
+    (issue.issue_field_values ?? []).map((value) => value.issue_field_id)
+  );
+
   for (const [field, rubric] of RUBRICS) {
     if (!set.has(field.id)) {
       questions[field.name.toLowerCase()] = {
@@ -184,11 +239,12 @@ export function questionsFor(issue: Issue, repoLabels: Label[]): Record<string, 
   }
 
   return questions;
-}
+};
 
 /** What Clef reads: the repository, and the issue as its author wrote it. */
-export function stateFor(issue: Issue): object {
+export const stateFor = (issue: Issue): IssueState => {
   const body = issue.body ?? "";
+
   return {
     repository: REPOSITORY,
     issue: {
@@ -197,48 +253,112 @@ export function stateFor(issue: Issue): object {
       labels: issue.labels.map(labelName),
     },
   };
-}
+};
+
+const isNumber = (value: unknown): value is number => typeof value === "number";
+
+const isString = (value: unknown): value is string => typeof value === "string";
+
+/** Whether a value is a JSON object, as `typeof` reads it: null counts, as it did before. */
+const isObjectLike = (value: unknown): value is object =>
+  typeof value === "object";
+
+/** Whether Clef answered a question with an object, rather than leaving it out. */
+const isRawAnswer = (answer: RawAnswer | undefined): answer is RawAnswer =>
+  typeof answer === "object" && answer !== null;
+
+/** Whether an answer has the shape of the question it answers, with a choice among its options. */
+const answersQuestion = (question: Question, answer: RawAnswer): boolean => {
+  if (answer.type !== question.type) {
+    return false;
+  }
+
+  if (question.type === "noul") {
+    return isNumber(answer.noul);
+  }
+
+  if (question.type === "score") {
+    return isNumber(answer.score);
+  }
+
+  return (
+    isString(answer.choice) &&
+    Object.hasOwn(question.criteria, answer.choice) &&
+    isObjectLike(answer.probabilities)
+  );
+};
 
 /** Throws unless every question has an answer of its own type, and a choice one of its options. */
-export function checkAnswers(
-  questions: Record<string, Question>,
-  answers: Record<string, unknown>,
-): asserts answers is Record<string, Answer> {
+export const checkAnswers: (
+  questions: Questions,
+  answers: RawAnswers
+) => asserts answers is Answers = (questions, answers) => {
   for (const [id, question] of Object.entries(questions)) {
-    const answer = answers[id] as Record<string, unknown> | undefined;
-    const ok =
-      typeof answer === "object" &&
-      answer !== null &&
-      answer.type === question.type &&
-      (question.type === "noul"
-        ? typeof answer.noul === "number"
-        : question.type === "score"
-          ? typeof answer.score === "number"
-          : typeof answer.choice === "string" &&
-            Object.hasOwn(question.criteria, answer.choice) &&
-            typeof answer.probabilities === "object");
-    if (!ok)
-      throw new Error(`Clef answered "${id}" outside its question: ${JSON.stringify(answer)}`);
+    const answer: RawAnswer | undefined = answers[id];
+
+    if (!isRawAnswer(answer) || !answersQuestion(question, answer)) {
+      throw new Error(
+        `Clef answered "${id}" outside its question: ${JSON.stringify(answer)}`
+      );
+    }
   }
-}
+};
 
 /** The level a probability-weighted score lands on; halfway between two is the lower. */
-export function levelOf(score: number, levels: number): number {
-  return Math.min(levels - 1, Math.max(0, Math.ceil(score - 0.5)));
-}
+export const levelOf = (score: number, levels: number): number =>
+  Math.min(levels - 1, Math.max(0, Math.ceil(score - 0.5)));
 
-function percent(probability: number): string {
-  return `${Math.round(probability * 100)}%`;
-}
+const percent = (probability: number): string =>
+  `${Math.round(probability * 100)}%`;
 
 /** The labels someone took off the issue, from its events: a run never adds them again. */
-export function removedLabels(events: IssueEvent[]): Set<string> {
-  return new Set(
+export const removedLabels = (events: IssueEvent[]): Set<string> =>
+  new Set(
     events.flatMap((event) =>
-      event.event === "unlabeled" && event.label ? [event.label.name] : [],
-    ),
+      event.event === "unlabeled" && event.label ? [event.label.name] : []
+    )
   );
-}
+
+/** Adds the topic labels whose answer clears the topic threshold, with a note for each. */
+const planTopics = (
+  questions: Questions,
+  answers: Answers,
+  plan: Plan
+): void => {
+  for (const topic of TOPICS) {
+    const answer = answers[topicId(topic)];
+
+    if (!questions[topicId(topic)] || answer?.type !== "noul") {
+      continue;
+    }
+
+    if (answer.noul >= THRESHOLDS.topic) {
+      plan.labels.push(topic);
+      plan.notes.push(`${topic}: yes at ${percent(answer.noul)}`);
+    }
+  }
+};
+
+/** Adds a level for each field the issue has no value for, with a note for each. */
+const planFields = (
+  questions: Questions,
+  answers: Answers,
+  set: ReadonlySet<number>,
+  plan: Plan
+): void => {
+  for (const field of RUBRICS.keys()) {
+    const id = field.name.toLowerCase();
+    const answer = answers[id];
+
+    if (!questions[id] || answer?.type !== "score" || set.has(field.id)) {
+      continue;
+    }
+
+    const value = field.levels[levelOf(answer.score, field.levels.length)];
+    plan.fields.push({ field, value });
+    plan.notes.push(`${id}: ${value} (score ${answer.score.toFixed(2)})`);
+  }
+};
 
 /**
  * What to change: the labels and the type whose answer clears its threshold, a level for each
@@ -247,79 +367,85 @@ export function removedLabels(events: IssueEvent[]): Set<string> {
  * has by now: `issue` is read again after Clef answers, so a type, scope or field value someone
  * set in the meantime stays.
  */
-export function planChanges(
+export const planChanges = (
   issue: Issue,
   repoLabels: Label[],
-  questions: Record<string, Question>,
-  answers: Record<string, Answer>,
-  context: Context,
-): Plan {
+  questions: Questions,
+  answers: Answers,
+  context: Context
+): Plan => {
   const exists = new Set(repoLabels.map((label) => label.name));
   const has = new Set(issue.labels.map(labelName));
-  const set = new Set((issue.issue_field_values ?? []).map((value) => value.issue_field_id));
+
+  const set = new Set(
+    (issue.issue_field_values ?? []).map((value) => value.issue_field_id)
+  );
+
   const plan: Plan = { labels: [], type: null, fields: [], notes: [] };
 
   const choose = (id: string, threshold: number): string | null => {
     const answer = answers[id];
-    if (!questions[id] || answer?.type !== "choice") return null;
+
+    if (!questions[id] || answer?.type !== "choice") {
+      return null;
+    }
+
     const probability = answer.probabilities[answer.choice] ?? 0;
     const taken = probability >= threshold;
     plan.notes.push(
-      `${id}: ${answer.choice} at ${percent(probability)}${taken ? "" : `, under ${percent(threshold)}: left for a maintainer`}`,
+      `${id}: ${answer.choice} at ${percent(probability)}${taken ? "" : `, under ${percent(threshold)}: left for a maintainer`}`
     );
+
     return taken ? answer.choice : null;
   };
 
   const type = choose("type", THRESHOLDS.type);
-  if (type && Object.hasOwn(TYPES, type) && !issue.type) plan.type = type;
+
+  if (type && Object.hasOwn(TYPES, type) && !issue.type) {
+    plan.type = type;
+  }
 
   const scope = choose("scope", THRESHOLDS.scope);
-  if (scope && ![...has].some((name) => name.startsWith("scope:"))) plan.labels.push(scope);
 
-  for (const topic of TOPICS) {
-    const answer = answers[topicId(topic)];
-    if (!questions[topicId(topic)] || answer?.type !== "noul") continue;
-    if (answer.noul >= THRESHOLDS.topic) {
-      plan.labels.push(topic);
-      plan.notes.push(`${topic}: yes at ${percent(answer.noul)}`);
-    }
+  if (scope && ![...has].some((name) => name.startsWith("scope:"))) {
+    plan.labels.push(scope);
   }
 
-  for (const field of RUBRICS.keys()) {
-    const id = field.name.toLowerCase();
-    const answer = answers[id];
-    if (!questions[id] || answer?.type !== "score" || set.has(field.id)) continue;
-    const value = field.levels[levelOf(answer.score, field.levels.length)];
-    plan.fields.push({ field, value });
-    plan.notes.push(`${id}: ${value} (score ${answer.score.toFixed(2)})`);
-  }
+  planTopics(questions, answers, plan);
+  planFields(questions, answers, set, plan);
 
   if (context.opened && !TEAM.has(issue.author_association ?? "")) {
     plan.labels.push("needs-triage");
   }
 
-  const add = [...new Set(plan.labels)].filter((name) => exists.has(name) && !has.has(name));
-  for (const name of add.filter((name) => context.removed.has(name))) {
-    plan.notes.push(`${name}: taken off before, so not added again`);
+  const add = [...new Set(plan.labels)].filter(
+    (name) => exists.has(name) && !has.has(name)
+  );
+
+  for (const label of add.filter((name) => context.removed.has(name))) {
+    plan.notes.push(`${label}: taken off before, so not added again`);
   }
+
   plan.labels = add.filter((name) => !context.removed.has(name));
+
   return plan;
-}
+};
 
 /** Asks Clef the questions about the state, through the AI Gateway. */
-export async function askClef(
+export const askClef = async (
   env: Env,
-  state: object,
-  questions: Record<string, Question>,
-  fetchImpl: typeof fetch = fetch,
-): Promise<Record<string, Answer>> {
+  state: IssueState,
+  questions: Questions,
+  fetchImpl: typeof fetch = fetch
+): Promise<Answers> => {
   const metadata = Object.fromEntries(
     Object.entries({
       workflow: env.GITHUB_WORKFLOW,
       run: env.GITHUB_RUN_ID,
       issue: env.ISSUE_NUMBER,
-    }).filter(([, value]) => value),
+    }).filter(([, value]) => value)
   );
+
   const response = await fetchImpl(
     `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL}`,
     {
@@ -332,21 +458,39 @@ export async function askClef(
         "cf-aig-metadata": JSON.stringify(metadata),
         "content-type": "application/json",
       },
-      body: JSON.stringify({ model: MODEL.slice(MODEL.lastIndexOf("/") + 1), state, questions }),
+      body: JSON.stringify({
+        model: MODEL.slice(MODEL.lastIndexOf("/") + 1),
+        state,
+        questions,
+      }),
       signal: AbortSignal.timeout(60_000),
-    },
+    }
   );
+
   const text = await response.text();
+
   if (!response.ok) {
-    throw new Error(`Clef returned HTTP ${response.status}: ${text.slice(0, 500)}`);
+    throw new Error(
+      `Clef returned HTTP ${response.status}: ${text.slice(0, 500)}`
+    );
   }
+
   // The REST API wraps the model's output in Cloudflare's envelope, as `result`.
-  const json = JSON.parse(text) as { result?: { answers?: unknown }; answers?: unknown };
-  const answers = (json.result ?? json).answers;
-  if (typeof answers !== "object" || answers === null) {
+  // SAFETY: a 2xx answer from the REST API is JSON, with the model's own output under result.
+  const json = JSON.parse(text) as {
+    result?: { answers?: unknown };
+    answers?: unknown;
+  };
+
+  const { answers } = json.result ?? json;
+
+  if (!isObjectLike(answers) || answers === null) {
     throw new Error(`Clef answered without answers: ${text.slice(0, 500)}`);
   }
-  const record = answers as Record<string, unknown>;
+
+  // SAFETY: checkAnswers holds every answer to the question it answers, right below.
+  const record = answers as RawAnswers;
   checkAnswers(questions, record);
+
   return record;
-}
+};

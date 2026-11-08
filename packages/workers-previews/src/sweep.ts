@@ -4,14 +4,22 @@ import { isPreviewName, previewName } from "./name.js";
  * A pull request. `fork` marks one whose branch is in another repository: it counts only for its
  * `pr-<number>` Preview, since its branch is not one of the repository's.
  */
-export type PullRequest = { number: number; branch: string; open: boolean; fork?: boolean };
+export interface PullRequest {
+  number: number;
+  branch: string;
+  open: boolean;
+  fork?: boolean;
+}
 
 /**
  * What the sweep compares the Previews with: every live branch, and the pull requests. Every open
  * pull request must be there; closed ones may be only the recent ones, since a missing one only
  * keeps a Preview longer.
  */
-export type RepositoryState = { branches: string[]; pullRequests: PullRequest[] };
+export interface RepositoryState {
+  branches: string[];
+  pullRequests: PullRequest[];
+}
 
 /** Where a Preview's name comes from. */
 export type PreviewOwner =
@@ -25,12 +33,12 @@ export type PreviewOwner =
   | { kind: "raw"; branch: string };
 
 /** The options of `planSweep`. */
-export type SweepOptions = {
+export interface SweepOptions {
   /** The branch production deploys from. Default `main`. */
   productionBranch?: string;
   /** Previews the sweep never deletes, by name. */
   keep?: readonly string[];
-};
+}
 
 /** A Preview with its owner and the sweep's verdict. */
 export type SweepEntry = { name: string } & PreviewOwner & {
@@ -50,20 +58,98 @@ export type SweepTarget =
   | { name: string; builds: "all" | "none"; branch?: undefined };
 
 /** The Previews' owners and verdicts, in name order, and the deletes that clear the stale ones. */
-export type SweepPlan = { entries: SweepEntry[]; targets: SweepTarget[] };
+export interface SweepPlan {
+  entries: SweepEntry[];
+  targets: SweepTarget[];
+}
+
+interface BranchIndex {
+  known: Set<string>;
+  hashed: Map<string, string>;
+}
+
+/** Every branch the repository knows of (the live ones and its own pull requests' heads), and each one's `previewName`. */
+const branchIndex = (
+  repository: RepositoryState,
+  production: string
+): BranchIndex => {
+  const known = new Set([
+    ...repository.branches,
+    ...repository.pullRequests
+      .filter((pull) => !pull.fork)
+      .map((pull) => pull.branch),
+  ]);
+
+  const hashed = new Map<string, string>();
+
+  for (const branch of known) {
+    if (branch && branch !== production) {
+      hashed.set(previewName(branch, { productionBranch: production }), branch);
+    }
+  }
+
+  return { known, hashed };
+};
+
+/** The `pr-<number>` name Cloudflare's GitHub Actions example gives a pull request's Preview. */
+const PULL_REQUEST_NAME = /^pr-(?<number>[1-9][0-9]*)$/u;
+
+const ownerOf = (
+  name: string,
+  repository: RepositoryState,
+  production: string,
+  index: BranchIndex
+): PreviewOwner => {
+  if (name === production) {
+    return { kind: "production", branch: production };
+  }
+
+  const pr = PULL_REQUEST_NAME.exec(name);
+
+  if (pr) {
+    const number = Number(pr.groups?.number);
+    const pull = repository.pullRequests.find((item) => item.number === number);
+    const branch = pull?.fork ? undefined : pull?.branch;
+
+    return branch === undefined
+      ? { kind: "pull-request", number }
+      : { kind: "pull-request", number, branch };
+  }
+
+  if (isPreviewName(name)) {
+    const branch = index.hashed.get(name);
+
+    if (branch !== undefined) {
+      return { kind: "hashed", branch };
+    }
+
+    // A branch that happens to look like a hashed name, deployed under its own name.
+    if (!index.known.has(name)) {
+      return { kind: "hashed" };
+    }
+  }
+
+  return { kind: "raw", branch: name };
+};
 
 /**
  * The owner of a Preview name. A hashed name is matched to the branch or pull request whose
  * `previewName` it is; one that no known branch hashes to, but that is itself a branch, is raw.
  */
-export function previewOwner(
+export const previewOwner = (
   name: string,
   repository: RepositoryState,
-  options: Pick<SweepOptions, "productionBranch"> = {},
-): PreviewOwner {
+  options: Pick<SweepOptions, "productionBranch"> = {}
+): PreviewOwner => {
   const production = options.productionBranch ?? "main";
-  return ownerOf(name, repository, production, branchIndex(repository, production));
-}
+
+  return ownerOf(
+    name,
+    repository,
+    production,
+    branchIndex(repository, production)
+  );
+};
 
 /**
  * Sorts each Preview into stale and live. A Preview is stale when its branch is gone, or when the
@@ -71,104 +157,113 @@ export function previewOwner(
  * does a live branch that never had one. Throws when the branches lack the production branch: the
  * list is then from the wrong repository, or the production branch is not `main`.
  */
-export function planSweep(
+export const planSweep = (
   previews: readonly string[],
   repository: RepositoryState,
-  options: SweepOptions = {},
-): SweepPlan {
+  options: SweepOptions = {}
+): SweepPlan => {
   const production = options.productionBranch ?? "main";
   const live = new Set(repository.branches);
-  if (!live.has(production))
+
+  if (!live.has(production)) {
     throw new Error(
-      `The repository's branches do not include the production branch ${production}: refusing to sweep against a list that may be wrong`,
+      `The repository's branches do not include the production branch ${production}: refusing to sweep against a list that may be wrong`
     );
-  const keep = new Set(options.keep ?? []);
-  const branchVerdict = (branch: string): Pick<SweepEntry, "action" | "reason"> => {
-    const own = repository.pullRequests.filter((pull) => !pull.fork && pull.branch === branch);
-    if (own.some((pull) => pull.open)) return { action: "keep", reason: "open pull request" };
-    if (!live.has(branch)) return { action: "delete", reason: "branch deleted" };
-    if (own.length === 0) return { action: "keep", reason: "branch has no pull request" };
-    return { action: "delete", reason: "every pull request from the branch is closed" };
+  }
+
+  const keep = new Set(options.keep);
+
+  const branchVerdict = (
+    branch: string
+  ): Pick<SweepEntry, "action" | "reason"> => {
+    const own = repository.pullRequests.filter(
+      (pull) => !pull.fork && pull.branch === branch
+    );
+
+    if (own.some((pull) => pull.open)) {
+      return { action: "keep", reason: "open pull request" };
+    }
+
+    if (!live.has(branch)) {
+      return { action: "delete", reason: "branch deleted" };
+    }
+
+    if (own.length === 0) {
+      return { action: "keep", reason: "branch has no pull request" };
+    }
+
+    return {
+      action: "delete",
+      reason: "every pull request from the branch is closed",
+    };
   };
-  const verdict = (name: string, owner: PreviewOwner): Pick<SweepEntry, "action" | "reason"> => {
-    if (keep.has(name)) return { action: "keep", reason: "kept by name" };
+
+  const verdict = (
+    name: string,
+    owner: PreviewOwner
+  ): Pick<SweepEntry, "action" | "reason"> => {
+    if (keep.has(name)) {
+      return { action: "keep", reason: "kept by name" };
+    }
+
     switch (owner.kind) {
-      case "production":
+      case "production": {
         return { action: "keep", reason: "production branch" };
-      case "pull-request":
-        return repository.pullRequests.some((pull) => pull.number === owner.number && pull.open)
+      }
+
+      case "pull-request": {
+        return repository.pullRequests.some(
+          (pull) => pull.number === owner.number && pull.open
+        )
           ? { action: "keep", reason: "open pull request" }
           : { action: "delete", reason: "pull request closed" };
-      case "hashed":
+      }
+
+      case "hashed": {
         return owner.branch === undefined
-          ? { action: "delete", reason: "no live branch or pull request has this name" }
+          ? {
+              action: "delete",
+              reason: "no live branch or pull request has this name",
+            }
           : branchVerdict(owner.branch);
-      case "raw":
+      }
+
+      default: {
         return branchVerdict(owner.branch);
+      }
     }
   };
 
   const index = branchIndex(repository, production);
-  const entries = [...new Set(previews)].sort().map((name): SweepEntry => {
+
+  const entries = [...new Set(previews)].toSorted().map((name): SweepEntry => {
     const owner = ownerOf(name, repository, production, index);
     const branch = "branch" in owner ? owner.branch : undefined;
-    return {
-      name,
-      ...owner,
-      ...(branch === undefined ? {} : { branchExists: live.has(branch) }),
-      ...verdict(name, owner),
-    };
+
+    const named =
+      branch === undefined
+        ? { name, ...owner }
+        : { name, ...owner, branchExists: live.has(branch) };
+
+    return { ...named, ...verdict(name, owner) };
   });
 
   const targets = new Map<string, SweepTarget>();
+
   for (const entry of entries) {
-    if (entry.action !== "delete" || entry.kind === "production") continue;
-    if (entry.kind === "pull-request")
+    if (entry.action !== "delete" || entry.kind === "production") {
+      continue;
+    }
+
+    if (entry.kind === "pull-request") {
       // Workers Builds never makes a `pr-<n>` Preview, so no build of it can be running.
       targets.set(`name:${entry.name}`, { name: entry.name, builds: "none" });
-    else if (entry.branch === undefined)
+    } else if (entry.branch === undefined) {
       targets.set(`name:${entry.name}`, { name: entry.name, builds: "all" });
-    else targets.set(`branch:${entry.branch}`, { branch: entry.branch });
+    } else {
+      targets.set(`branch:${entry.branch}`, { branch: entry.branch });
+    }
   }
+
   return { entries, targets: [...targets.values()] };
-}
-
-function ownerOf(
-  name: string,
-  repository: RepositoryState,
-  production: string,
-  index: BranchIndex,
-): PreviewOwner {
-  if (name === production) return { kind: "production", branch: production };
-  const pr = /^pr-([1-9][0-9]*)$/.exec(name);
-  if (pr) {
-    const number = Number(pr[1]);
-    const pull = repository.pullRequests.find((pull) => pull.number === number);
-    const branch = pull?.fork ? undefined : pull?.branch;
-    return branch === undefined
-      ? { kind: "pull-request", number }
-      : { kind: "pull-request", number, branch };
-  }
-  if (isPreviewName(name)) {
-    const branch = index.hashed.get(name);
-    if (branch !== undefined) return { kind: "hashed", branch };
-    // A branch that happens to look like a hashed name, deployed under its own name.
-    if (!index.known.has(name)) return { kind: "hashed" };
-  }
-  return { kind: "raw", branch: name };
-}
-
-type BranchIndex = { known: Set<string>; hashed: Map<string, string> };
-
-/** Every branch the repository knows of (the live ones and its own pull requests' heads), and each one's `previewName`. */
-function branchIndex(repository: RepositoryState, production: string): BranchIndex {
-  const known = new Set([
-    ...repository.branches,
-    ...repository.pullRequests.filter((pull) => !pull.fork).map((pull) => pull.branch),
-  ]);
-  const hashed = new Map<string, string>();
-  for (const branch of known)
-    if (branch && branch !== production)
-      hashed.set(previewName(branch, { productionBranch: production }), branch);
-  return { known, hashed };
-}
+};

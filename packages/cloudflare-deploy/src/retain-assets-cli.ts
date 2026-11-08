@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
+
 import { cloudflareApi } from "./cloudflare-api.js";
 import { cloudflareApiToken } from "./process.js";
 import { previousAssetsTarget, retainBuildAssets } from "./retain-assets.js";
@@ -11,13 +12,22 @@ import { previousAssetsTarget, retainBuildAssets } from "./retain-assets.js";
  * (`GITHUB_SHA`, or `WORKERS_CI_COMMIT_SHA` on Workers Builds) labels the build. A Cloudflare
  * `internal error` is retried for about 15 seconds, so a passing one does not fail the deploy.
  */
-async function main() {
-  const [flag, configPath, ...rest] = process.argv.slice(2).filter((arg) => arg !== "--");
-  if (flag !== "--config" || !configPath || rest.length)
+const main = async () => {
+  const [flag, configPath, ...rest] = process.argv
+    .slice(2)
+    .filter((arg) => arg !== "--");
+
+  if (flag !== "--config" || !configPath || rest.length) {
     throw new Error(
-      "Usage: cloudflare-retain-assets --config <path to the deploy's wrangler.json>",
+      "Usage: cloudflare-retain-assets --config <path to the deploy's wrangler.json>"
     );
-  const target = previousAssetsTarget(JSON.parse(await readFile(configPath, "utf8")), configPath);
+  }
+
+  const target = previousAssetsTarget(
+    JSON.parse(await readFile(configPath, "utf-8")),
+    configPath
+  );
+
   await retainBuildAssets({
     api: cloudflareApi({
       accountId: target.accountId,
@@ -26,10 +36,11 @@ async function main() {
     }),
     namespaceId: target.namespaceId,
     clientDir: target.clientDir,
-    build: process.env.GITHUB_SHA || process.env.WORKERS_CI_COMMIT_SHA || "local",
+    build:
+      process.env.GITHUB_SHA || process.env.WORKERS_CI_COMMIT_SHA || "local",
     log: console.log,
   });
-}
+};
 
 try {
   await main();

@@ -24,22 +24,31 @@ export interface D1Migrations {
 
 /** The part of a prepared statement `migrateD1` uses. A `D1PreparedStatement` has it. */
 export interface D1StatementLike {
+  // oxlint-disable-next-line typescript/method-signature-style -- a property signature checks parameters contravariantly, which stops a real D1PreparedStatement from fitting this shape
   bind(...values: unknown[]): D1StatementLike;
+  // oxlint-disable-next-line typescript/method-signature-style, anti-slop/no-unknown-returns -- as above, and `unknown` is the widest return a real statement's run() fits
   run(): Promise<unknown>;
+  // oxlint-disable-next-line typescript/method-signature-style -- as above
   all(): Promise<{ results: unknown[] }>;
 }
 
 /** The part of a database `migrateD1` uses. A `D1Database` binding has it, and so does a session. */
 export interface D1DatabaseLike {
+  // oxlint-disable-next-line typescript/method-signature-style -- a property signature checks parameters contravariantly, which stops a real D1Database from fitting this shape
   prepare(query: string): D1StatementLike;
+  // oxlint-disable-next-line typescript/method-signature-style, anti-slop/no-unknown-returns -- as above, and `unknown` is the widest return a real database's batch() fits
   batch(statements: D1StatementLike[]): Promise<unknown>;
 }
 
 /** What {@link migrateD1} resolves to once every migration the database lacked is applied. */
-export type MigrateD1Result = {
+export interface MigrateD1Result {
   /** The migrations this call applied, in order. Empty when the database was up to date. */
   applied: string[];
-};
+}
+
+/** An SQL identifier in double quotes, as Wrangler quotes the migrations table's name. */
+const quoteIdentifier = (name: string): string =>
+  `"${name.replaceAll('"', '""')}"`;
 
 /** A migration failed. The database keeps the migrations before it, and nothing of this one. */
 export class D1MigrationError extends Error {
@@ -52,7 +61,7 @@ export class D1MigrationError extends Error {
   constructor(migration: string, applied: string[], cause: unknown) {
     super(
       `D1 migration ${migration} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
-      { cause },
+      { cause }
     );
     this.migration = migration;
     this.applied = applied;
@@ -72,10 +81,10 @@ export class D1MigrationError extends Error {
  * - A migration the table records but `migrations` lacks, such as one a newer deploy applied, is
  *   left alone.
  */
-export async function migrateD1(
+export const migrateD1 = async (
   db: D1DatabaseLike,
-  migrations: D1Migrations,
-): Promise<MigrateD1Result> {
+  migrations: D1Migrations
+): Promise<MigrateD1Result> => {
   const table = quoteIdentifier(migrations.table ?? DEFAULT_MIGRATIONS_TABLE);
   // Byte for byte Wrangler's statement: SQLite keeps its text in sqlite_schema, so a database
   // migrated here has the same schema as one `wrangler d1 migrations apply` migrated.
@@ -85,20 +94,28 @@ export async function migrateD1(
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
 		name       TEXT UNIQUE,
 		applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-);`,
+);`
     )
     .run();
 
   const recorded = async () => {
     const { results } = await db.prepare(`SELECT name FROM ${table}`).all();
+
+    // SAFETY: the query selects `name`, so every row has that column.
     return new Set(results.map((row) => (row as { name: unknown }).name));
   };
+
   const done = await recorded();
   const record = db.prepare(`INSERT INTO ${table} (name) values (?)`);
   const applied: string[] = [];
+
   for (const migration of migrations.migrations) {
-    if (done.has(migration.name)) continue;
+    if (done.has(migration.name)) {
+      continue;
+    }
+
     try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each migration must be applied and recorded before the next one starts
       await db.batch([
         ...migration.queries.map((query) => db.prepare(query)),
         record.bind(migration.name),
@@ -106,15 +123,16 @@ export async function migrateD1(
       applied.push(migration.name);
     } catch (error) {
       // Another call applied it first, and this batch rolled back.
-      const recordedNow = await recorded().catch(() => undefined);
-      if (recordedNow?.has(migration.name)) continue;
+      // oxlint-disable-next-line eslint/no-await-in-loop -- the table is re-read only for the migration that just failed
+      const recordedNow = await recorded().catch(() => null);
+
+      if (recordedNow?.has(migration.name)) {
+        continue;
+      }
+
       throw new D1MigrationError(migration.name, applied, error);
     }
   }
-  return { applied };
-}
 
-/** An SQL identifier in double quotes, as Wrangler quotes the migrations table's name. */
-function quoteIdentifier(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
+  return { applied };
+};

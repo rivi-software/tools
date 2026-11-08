@@ -6,7 +6,9 @@
  * other, and an alarm at the window's end empties its storage.
  */
 import { DurableObject } from "cloudflare:workers";
-import { type DurableObjectNamespaceLike, forget, objectFor } from "./objects.js";
+
+import { forget, objectFor } from "./objects.js";
+import type { DurableObjectNamespaceLike } from "./objects.js";
 
 /** How many requests a key may make, and over how long. */
 export interface RateLimitOptions {
@@ -37,45 +39,85 @@ export interface RateLimitWindow {
 /** The methods of a `RateLimiter` stub that the clients call. */
 export interface RateLimiterStub {
   /** Counts one request for the object's key (`RateLimiter.consume`). */
-  consume(options: RateLimitOptions): Promise<RateLimitResult>;
+  consume: (options: RateLimitOptions) => Promise<RateLimitResult>;
   /** Forgets the key's window (`RateLimiter.reset`). */
-  reset(): Promise<void>;
+  reset: () => Promise<void>;
+}
+
+/** What `countRequest` answers: the window to store, and the result for the caller. */
+export interface CountedRequest {
+  /** The window after the request, the one that was given back when nothing changed. */
+  window: RateLimitWindow;
+  /** Whether the request is within the limit, and what is left of the window. */
+  result: RateLimitResult;
 }
 
 /** Throws a `RangeError` for a limit or window that cannot count anything. */
-export function assertRateLimitOptions(options: RateLimitOptions): void {
+export const assertRateLimitOptions = (options: RateLimitOptions): void => {
   const { limit, windowSeconds } = options ?? {};
-  if (!Number.isSafeInteger(limit) || limit < 1)
-    throw new RangeError(`limit must be a whole number, 1 or more, not ${limit}`);
-  if (typeof windowSeconds !== "number" || !Number.isFinite(windowSeconds) || windowSeconds <= 0)
-    throw new RangeError(`windowSeconds must be a number above 0, not ${windowSeconds}`);
-}
+
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new RangeError(
+      `limit must be a whole number, 1 or more, not ${limit}`
+    );
+  }
+
+  if (
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- a published entry point: JavaScript callers can pass anything, and the RangeError is part of its behaviour
+    typeof windowSeconds !== "number" ||
+    !Number.isFinite(windowSeconds) ||
+    windowSeconds <= 0
+  ) {
+    throw new RangeError(
+      `windowSeconds must be a number above 0, not ${windowSeconds}`
+    );
+  }
+};
 
 /**
  * Counts one request at `now` against `window`. A window opens at the first request after the
  * last one ended, at `resetAt` or later, and keeps the end it opened with: a new `windowSeconds`
  * applies from the next window, a new `limit` at once.
  */
-export function countRequest(
+export const countRequest = (
   window: RateLimitWindow | undefined,
   options: RateLimitOptions,
-  now: number,
-): { window: RateLimitWindow; result: RateLimitResult } {
+  now: number
+): CountedRequest => {
   if (!window || now >= window.resetAt) {
-    const opened = { count: 1, resetAt: now + Math.ceil(options.windowSeconds * 1000) };
+    const opened = {
+      count: 1,
+      resetAt: now + Math.ceil(options.windowSeconds * 1000),
+    };
+
     return {
       window: opened,
-      result: { allowed: true, remaining: options.limit - 1, resetAt: opened.resetAt },
+      result: {
+        allowed: true,
+        remaining: options.limit - 1,
+        resetAt: opened.resetAt,
+      },
     };
   }
-  if (window.count >= options.limit)
-    return { window, result: { allowed: false, remaining: 0, resetAt: window.resetAt } };
+
+  if (window.count >= options.limit) {
+    return {
+      window,
+      result: { allowed: false, remaining: 0, resetAt: window.resetAt },
+    };
+  }
+
   const counted = { count: window.count + 1, resetAt: window.resetAt };
+
   return {
     window: counted,
-    result: { allowed: true, remaining: options.limit - counted.count, resetAt: counted.resetAt },
+    result: {
+      allowed: true,
+      remaining: options.limit - counted.count,
+      resetAt: counted.resetAt,
+    },
   };
-}
+};
 
 const WINDOW = "window";
 
@@ -90,8 +132,15 @@ export class RateLimiter extends DurableObject<unknown> {
     const { storage } = this.ctx;
     const current = storage.kv.get<RateLimitWindow>(WINDOW);
     const { window, result } = countRequest(current, options, Date.now());
-    if (window !== current) storage.kv.put(WINDOW, window);
-    if (window.resetAt !== current?.resetAt) await storage.setAlarm(window.resetAt);
+
+    if (window !== current) {
+      storage.kv.put(WINDOW, window);
+    }
+
+    if (window.resetAt !== current?.resetAt) {
+      await storage.setAlarm(window.resetAt);
+    }
+
     return result;
   }
 
@@ -103,8 +152,10 @@ export class RateLimiter extends DurableObject<unknown> {
   /** The window has ended: the object keeps nothing for an idle key. */
   async alarm(): Promise<void> {
     const window = this.ctx.storage.kv.get<RateLimitWindow>(WINDOW);
-    if (window && window.resetAt > Date.now()) await this.ctx.storage.setAlarm(window.resetAt);
-    else await forget(this.ctx.storage);
+
+    await (window && window.resetAt > Date.now()
+      ? this.ctx.storage.setAlarm(window.resetAt)
+      : forget(this.ctx.storage));
   }
 }
 
@@ -112,20 +163,21 @@ export class RateLimiter extends DurableObject<unknown> {
  * Counts one request for `key` in `namespace`, a binding of `RateLimiter`, and answers whether it
  * is within `limit` requests per `windowSeconds`.
  */
-export async function rateLimit<Id>(
+export const rateLimit = async <Id>(
   namespace: DurableObjectNamespaceLike<Id, RateLimiterStub>,
   key: string,
-  options: RateLimitOptions,
-): Promise<RateLimitResult> {
+  options: RateLimitOptions
+): Promise<RateLimitResult> => {
   assertRateLimitOptions(options);
   const { limit, windowSeconds } = options;
-  return objectFor(namespace, key).consume({ limit, windowSeconds });
-}
+
+  return await objectFor(namespace, key).consume({ limit, windowSeconds });
+};
 
 /** Forgets `key`'s count, such as after a sign-in that succeeded. */
-export async function resetRateLimit<Id>(
+export const resetRateLimit = async <Id>(
   namespace: DurableObjectNamespaceLike<Id, RateLimiterStub>,
-  key: string,
-): Promise<void> {
+  key: string
+): Promise<void> => {
   await objectFor(namespace, key).reset();
-}
+};

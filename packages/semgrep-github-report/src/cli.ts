@@ -4,10 +4,9 @@
 // command would exit 0 having posted nothing.
 import { main } from "./main.js";
 
-main(process.argv.slice(2), process.env).then(
-  (output) => console.log(output),
-  (error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  },
-);
+try {
+  console.log(await main(process.argv.slice(2), process.env));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+}

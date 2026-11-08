@@ -7,15 +7,16 @@ declare module "cloudflare:workers" {
     protected ctx: {
       readonly storage: {
         readonly kv: {
-          get<T>(key: string): T | undefined;
-          put<T>(key: string, value: T): void;
+          get: <T>(key: string) => T | undefined;
+          put: <T>(key: string, value: T) => void;
         };
-        setAlarm(scheduledTime: number | Date): Promise<void>;
-        deleteAlarm(): Promise<void>;
-        deleteAll(): Promise<void>;
+        setAlarm: (scheduledTime: number | Date) => Promise<void>;
+        deleteAlarm: () => Promise<void>;
+        deleteAll: () => Promise<void>;
       };
     };
     protected env: Env;
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the runtime's own signature: the state object it passes is opaque to this package
     constructor(ctx: unknown, env: Env);
   }
 }

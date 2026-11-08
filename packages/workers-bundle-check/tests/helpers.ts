@@ -1,32 +1,46 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+
 import { build } from "vite";
 import { afterAll } from "vitest";
 
 /** A directory, by its real path, removed after the test file's tests. */
-export function temporaryDirectory(): string {
-  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), "workers-bundle-check-")));
+export const temporaryDirectory = (): string => {
+  const dir = realpathSync(
+    mkdtempSync(path.join(tmpdir(), "workers-bundle-check-"))
+  );
+
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
   return dir;
-}
+};
 
 /** Writes each file of `files`, by its path under `dir`. */
-export function write(dir: string, files: Record<string, string>): void {
+export const write = (dir: string, files: Record<string, string>): void => {
   for (const [file, content] of Object.entries(files)) {
     mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
     writeFileSync(path.join(dir, file), content);
   }
-}
+};
 
 /**
  * A key shaped like Stripe's secret test key, put together here so that no secret scanner finds
  * one in this repository. It is the example key Stripe's documentation publishes.
  */
-export const STRIPE_TEST_KEY = ["sk", "test", "4eC39HqLyjWDarjtT1zdp7dc"].join("_");
+export const STRIPE_TEST_KEY = ["sk", "test", "4eC39HqLyjWDarjtT1zdp7dc"].join(
+  "_"
+);
 
 /**
  * A Worker project to build:
@@ -36,7 +50,7 @@ export const STRIPE_TEST_KEY = ["sk", "test", "4eC39HqLyjWDarjtT1zdp7dc"].join("
  *   there, and nothing imports them
  * - `fake-mock` carries a value shaped like a Stripe secret key, and the marker `FAKE_MOCK_ACTIVE`
  */
-export function workerProject(): string {
+export const workerProject = (): string => {
   const dir = temporaryDirectory();
   write(dir, {
     "src/index.ts": [
@@ -54,8 +68,11 @@ export function workerProject(): string {
       "};",
       "void neverCalled;",
     ].join("\n"),
-    "src/util.ts": "export function greet(name: string) { return `hello ${name}`; }\n",
-    "src/shaken.ts": 'export function neverCalled() { return "SHAKEN_AWAY"; }\n',
+    "src/util.ts":
+      // oxlint-disable-next-line eslint/no-template-curly-in-string -- this is the source of the test project's module, which has a template literal of its own
+      "export function greet(name: string) { return `hello ${name}`; }\n",
+    "src/shaken.ts":
+      'export function neverCalled() { return "SHAKEN_AWAY"; }\n',
     "src/lazy.ts": 'export function lazy() { return "lazy chunk"; }\n',
     "src/mocks/handlers.ts": 'export const handlers = ["DEV_ONLY_HANDLERS"];\n',
     "node_modules/fake-mock/package.json": JSON.stringify({
@@ -69,13 +86,14 @@ export function workerProject(): string {
       `const key = "${STRIPE_TEST_KEY}";`,
       'export function setupMock() { return "FAKE_MOCK_ACTIVE " + key; }',
     ].join("\n"),
-    "node_modules/.pnpm/icons@1.0.0/node_modules/icons/package.json": JSON.stringify({
-      name: "icons",
-      version: "1.0.0",
-      type: "module",
-      main: "dist/index.js",
-      sideEffects: false,
-    }),
+    "node_modules/.pnpm/icons@1.0.0/node_modules/icons/package.json":
+      JSON.stringify({
+        name: "icons",
+        version: "1.0.0",
+        type: "module",
+        main: "dist/index.js",
+        sideEffects: false,
+      }),
     "node_modules/.pnpm/icons@1.0.0/node_modules/icons/dist/index.js":
       'export * from "./icons/all.js";\n',
     "node_modules/.pnpm/icons@1.0.0/node_modules/icons/dist/icons/all.js":
@@ -86,15 +104,23 @@ export function workerProject(): string {
     }),
     "node_modules/unused-dep/index.js": 'export const marker = "UNUSED_DEP";\n',
   });
-  symlinkSync(".pnpm/icons@1.0.0/node_modules/icons", path.join(dir, "node_modules/icons"), "dir");
+  symlinkSync(
+    ".pnpm/icons@1.0.0/node_modules/icons",
+    path.join(dir, "node_modules/icons"),
+    "dir"
+  );
+
   return dir;
-}
+};
 
 /** Builds the project's Worker with Vite (Rolldown) into `outDir`, minified, as an SSR build. */
-export async function viteBuild(
+export const viteBuild = async (
   root: string,
-  { outDir = "dist/server", sourcemap = true as boolean | "hidden" | "inline" } = {},
-): Promise<void> {
+  {
+    outDir = "dist/server",
+    sourcemap = true,
+  }: { outDir?: string; sourcemap?: boolean | "hidden" | "inline" } = {}
+): Promise<void> => {
   await build({
     configFile: false,
     root,
@@ -106,39 +132,47 @@ export async function viteBuild(
       emptyOutDir: true,
       minify: true,
       sourcemap,
-      rolldownOptions: { external: [/^cloudflare:/] },
+      rolldownOptions: { external: [/^cloudflare:/u] },
     },
   });
-}
+};
 
 const wranglerBin = path.join(
   path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
   "bin",
-  "wrangler.js",
+  "wrangler.js"
 );
 
 /** Runs the project's Wrangler in `cwd` and returns its output. */
-export async function wrangler(
+export const wrangler = async (
   cwd: string,
   args: string[],
-  env: Record<string, string> = {},
-): Promise<string> {
-  const { stdout, stderr } = await promisify(execFile)(process.execPath, [wranglerBin, ...args], {
-    cwd,
-    env: {
-      ...process.env,
-      CI: "1",
-      NO_COLOR: "1",
-      WRANGLER_SEND_METRICS: "false",
-      WRANGLER_LOG_PATH: path.join(cwd, ".wrangler-logs"),
-      ...env,
-    },
-  });
+  env: Record<string, string> = {}
+): Promise<string> => {
+  const { stdout, stderr } = await promisify(execFile)(
+    process.execPath,
+    [wranglerBin, ...args],
+    {
+      cwd,
+      env: {
+        ...process.env,
+        CI: "1",
+        NO_COLOR: "1",
+        WRANGLER_SEND_METRICS: "false",
+        WRANGLER_LOG_PATH: path.join(cwd, ".wrangler-logs"),
+        ...env,
+      },
+    }
+  );
+
   return stdout + stderr;
-}
+};
 
 /** Builds the project's Worker as `wrangler deploy` does (esbuild), with its source map, into `outDir`. */
-export async function wranglerBuild(root: string, outDir = "dist/wrangler"): Promise<void> {
+export const wranglerBuild = async (
+  root: string,
+  outDir = "dist/wrangler"
+): Promise<void> => {
   write(root, {
     "wrangler.json": JSON.stringify({
       name: "workers-bundle-check-test",
@@ -148,4 +182,4 @@ export async function wranglerBuild(root: string, outDir = "dist/wrangler"): Pro
     }),
   });
   await wrangler(root, ["deploy", "--dry-run", "--minify", "--outdir", outDir]);
-}
+};

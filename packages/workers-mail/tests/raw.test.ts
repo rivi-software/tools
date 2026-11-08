@@ -1,12 +1,14 @@
 import { createHash, createHmac } from "node:crypto";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import {
   MailError,
   sendRawMail,
   sendRawWithBinding,
   sendRawWithSes,
-  type RawMail,
 } from "../src/index.js";
+import type { RawMail } from "../src/index.js";
 import { signAwsRequest } from "../src/sigv4.js";
 import { EmailMessage } from "./cloudflare-email.js";
 
@@ -16,7 +18,11 @@ const SES = {
   SES_SECRET_ACCESS_KEY: "test-secret",
 };
 
-const SES_CONFIG = { region: "eu-west-1", accessKeyId: "k", secretAccessKey: "s" };
+const SES_CONFIG = {
+  region: "eu-west-1",
+  accessKeyId: "k",
+  secretAccessKey: "s",
+};
 
 /** A signed message as PGP/MIME writes it: the bytes the signature covers must arrive unchanged. */
 const RAW = [
@@ -42,7 +48,8 @@ const RAW = [
   "",
 ].join("\r\n");
 
-const AUTOCRYPT = "addr=jane@example.com; keydata=\r\n xjMEZ1AAAAAWCSsGAQQB2kcPAQEHQL0\r\n\tAAAA";
+const AUTOCRYPT =
+  "addr=jane@example.com; keydata=\r\n xjMEZ1AAAAAWCSsGAQQB2kcPAQEHQL0\r\n\tAAAA";
 
 const MAIL: RawMail = {
   from: "jane@example.com",
@@ -54,21 +61,27 @@ const MAIL: RawMail = {
 };
 
 /** A `send_email` binding that records each message and answers each with a Message-ID of its own. */
-function binding(fail?: { at: number; error: Error & { code?: string } }) {
+const binding = (fail?: { at: number; error: Error & { code?: string } }) => {
   const sent: EmailMessage[] = [];
+
   return {
     sent,
     EMAIL: {
+      // oxlint-disable-next-line eslint/require-await -- the stand-in answers with a promise, as the real send_email binding does
       async send(message: EmailMessage) {
-        if (fail && sent.length === fail.at) throw fail.error;
+        if (fail && sent.length === fail.at) {
+          throw fail.error;
+        }
+
         sent.push(message);
+
         return { messageId: `<cf${sent.length}@example.com>` };
       },
     },
   };
-}
+};
 
-type SesRequest = {
+interface SesRequest {
   url: string;
   method: string;
   headers: Headers;
@@ -80,13 +93,13 @@ type SesRequest = {
     ConfigurationSetName?: string;
     EmailTags?: { Name: string; Value: string }[];
   };
-};
+}
 
 /** SES through a spy on the global `fetch`: answers each send with `answer`, records the request. */
-function fakeSes(
+const fakeSes = (
   answer: () => Response | Promise<Response> = () =>
-    Response.json({ MessageId: "0107-raw-000000" }),
-) {
+    Response.json({ MessageId: "0107-raw-000000" })
+) => {
   const requests: SesRequest[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const request = new Request(input, init);
@@ -96,76 +109,130 @@ function fakeSes(
       method: request.method,
       headers: request.headers,
       text,
+      // SAFETY: every request this spy sees is one `sendRawWithSes` just sent, so its body is that JSON.
       body: JSON.parse(text) as SesRequest["body"],
     });
+
     return answer();
   });
+
   return requests;
-}
+};
 
 const refusal = (status: number, type: string, message: string) =>
-  new Response(JSON.stringify({ message }), {
-    status,
-    headers: {
-      "content-type": "application/json",
-      "x-amzn-ErrorType": `${type}:http://internal.amazon.com/coral/`,
-    },
-  });
+  Response.json(
+    { message },
+    {
+      status,
+      headers: {
+        "content-type": "application/json",
+        "x-amzn-ErrorType": `${type}:http://internal.amazon.com/coral/`,
+      },
+    }
+  );
 
-const decoded = (data: string) => Buffer.from(data, "base64").toString("utf8");
-const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+const decoded = (data: string) => Buffer.from(data, "base64").toString("utf-8");
 
+const sha256 = (value: string) =>
+  createHash("sha256").update(value).digest("hex");
+
+// oxlint-disable-next-line vitest/require-top-level-describe -- one hook for every describe in this file
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("sendRawMail", () => {
-  it("sends through SES once it has a key: the message under the SES-only headers, signed for its region", async () => {
+describe(sendRawMail, () => {
+  it("sends through SES once it has a key, and nothing through the binding", async () => {
     const { sent, EMAIL } = binding();
     const requests = fakeSes();
     const result = await sendRawMail({ EMAIL, ...SES }, MAIL);
-    expect(result).toEqual({
+    expect(result).toStrictEqual({
       transport: "ses",
       id: "0107-raw-000000",
       messageId: "<0107-raw-000000@eu-west-1.amazonses.com>",
     });
-    expect(sent).toEqual([]);
+    expect(sent).toStrictEqual([]);
     expect(requests).toHaveLength(1);
+  });
+
+  it("posts JSON to SES's endpoint for the region, with its date", async () => {
+    const { EMAIL } = binding();
+    const requests = fakeSes();
+    await sendRawMail({ EMAIL, ...SES }, MAIL);
     const [request] = requests;
-    expect(request!.url).toBe("https://email.eu-west-1.amazonaws.com/v2/email/outbound-emails");
-    expect(request!.method).toBe("POST");
-    expect(request!.headers.get("content-type")).toBe("application/json");
-    expect(request!.headers.get("x-amz-date")).toMatch(/^\d{8}T\d{6}Z$/);
-    expect(request!.headers.get("x-amz-content-sha256")).toBe(sha256(request!.text));
-    expect(request!.headers.get("authorization")).toMatch(
-      /^AWS4-HMAC-SHA256 Credential=AKIATESTKEY\/\d{8}\/eu-west-1\/ses\/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=[0-9a-f]{64}$/,
+    expect(request?.url).toBe(
+      "https://email.eu-west-1.amazonaws.com/v2/email/outbound-emails"
     );
-    expect(request!.body).toEqual({
+    expect(request?.method).toBe("POST");
+    expect(request?.headers.get("content-type")).toBe("application/json");
+    expect(request?.headers.get("x-amz-date")).toMatch(/^\d{8}T\d{6}Z$/u);
+  });
+
+  it("signs the body and names the headers it signed", async () => {
+    const { EMAIL } = binding();
+    const requests = fakeSes();
+    await sendRawMail({ EMAIL, ...SES }, MAIL);
+    const [request] = requests;
+    expect(request?.headers.get("x-amz-content-sha256")).toBe(
+      sha256(request?.text ?? "")
+    );
+    expect(request?.headers.get("authorization")).toMatch(
+      /^AWS4-HMAC-SHA256 Credential=AKIATESTKEY\/\d{8}\/eu-west-1\/ses\/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=[0-9a-f]{64}$/u
+    );
+  });
+
+  it("sends the message under the SES-only headers, every recipient in the envelope", async () => {
+    const { EMAIL } = binding();
+    const requests = fakeSes();
+    await sendRawMail({ EMAIL, ...SES }, MAIL);
+    const [request] = requests;
+    expect(request?.body).toStrictEqual({
       FromEmailAddress: "jane@example.com",
-      Destination: { ToAddresses: ["bob@example.org", "carol@example.org", "dave@example.org"] },
+      Destination: {
+        ToAddresses: [
+          "bob@example.org",
+          "carol@example.org",
+          "dave@example.org",
+        ],
+      },
       Content: { Raw: { Data: expect.any(String) } },
       EmailTags: [{ Name: "kind", Value: "pgp" }],
     });
-    expect(decoded(request!.body.Content.Raw.Data)).toBe(`Autocrypt: ${AUTOCRYPT}\r\n${RAW}`);
+    expect(decoded(request?.body.Content.Raw.Data ?? "")).toBe(
+      `Autocrypt: ${AUTOCRYPT}\r\n${RAW}`
+    );
   });
 
   it("hands a message SES refused to the binding: once per recipient, the same bytes, no SES-only headers", async () => {
     const { sent, EMAIL } = binding();
-    fakeSes(() => refusal(403, "AccessDeniedException", "not authorized to perform ses:SendEmail"));
+    fakeSes(() =>
+      refusal(
+        403,
+        "AccessDeniedException",
+        "not authorized to perform ses:SendEmail"
+      )
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await sendRawMail({ EMAIL, ...SES }, MAIL);
-    expect(result).toEqual({
+    expect(result).toStrictEqual({
       transport: "email-service",
       id: "<cf1@example.com>",
       messageId: "<cf1@example.com>",
     });
-    expect(sent.map((m) => m instanceof EmailMessage && [m.from, m.to])).toEqual([
+    expect(
+      sent.map((m) => m instanceof EmailMessage && [m.from, m.to])
+    ).toStrictEqual([
       ["jane@example.com", "bob@example.org"],
       ["jane@example.com", "carol@example.org"],
       ["jane@example.com", "dave@example.org"],
     ]);
-    for (const message of sent) expect(message.raw).toBe(RAW);
-    expect(JSON.parse(String(warn.mock.calls[0]![0]))).toEqual({
+
+    for (const message of sent) {
+      expect(message.raw).toBe(RAW);
+    }
+
+    const [warned] = warn.mock.calls;
+    expect(JSON.parse(String(warned?.[0]))).toStrictEqual({
       event: "mail.ses_refused",
       status: 403,
       code: "AccessDeniedException",
@@ -177,33 +244,47 @@ describe("sendRawMail", () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     const result = await sendRawMail({ EMAIL, SES_REGION: "eu-west-1" }, MAIL);
     expect(result.transport).toBe("email-service");
-    expect(sent.map((m) => m.to)).toEqual(MAIL.recipients);
+    expect(sent.map((m) => m.to)).toStrictEqual(MAIL.recipients);
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("never sends again through the binding when SES may have taken the message", async () => {
     const { sent, EMAIL } = binding();
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("fetch failed"));
-    const err = await sendRawMail({ EMAIL, ...SES }, MAIL).catch((e: unknown) => e);
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new TypeError("fetch failed")
+    );
+
+    const err = await sendRawMail({ EMAIL, ...SES }, MAIL).catch(
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejection reason is unknown until this test says what it is
+      (error: unknown) => error
+    );
+
     expect(err).toBeInstanceOf(MailError);
-    expect(err).toMatchObject({ transport: "ses", status: undefined, message: "fetch failed" });
-    expect(sent).toEqual([]);
+    expect(err).toMatchObject({
+      transport: "ses",
+      status: undefined,
+      message: "fetch failed",
+    });
+    expect(sent).toStrictEqual([]);
   });
 
   it("keeps SES's refusal without a binding, and refuses to send without either", async () => {
-    fakeSes(() => refusal(400, "MessageRejected", "Email address is not verified."));
+    fakeSes(() =>
+      refusal(400, "MessageRejected", "Email address is not verified.")
+    );
     await expect(sendRawMail(SES, MAIL)).rejects.toMatchObject({
       transport: "ses",
       status: 400,
       code: "MessageRejected",
       refusedMessage: true,
     });
-    await expect(sendRawMail({}, MAIL)).rejects.toThrow(/^No mail transport/);
+    await expect(sendRawMail({}, MAIL)).rejects.toThrow(/^No mail transport/u);
   });
 
   it("refuses an SES-only header that would break out of its line, before anything is sent", async () => {
     const { sent, EMAIL } = binding();
     const requests = fakeSes();
+
     const bad: Record<string, string>[] = [
       { Autocrypt: "addr=a@b\r\nBcc: eve@example.net" },
       { Autocrypt: "addr=a@b\n keydata=x" },
@@ -215,9 +296,15 @@ describe("sendRawMail", () => {
       { "X-A:\r\nBcc": "eve@example.net" },
       { "": "x" },
     ];
+
     for (const sesOnlyHeaders of bad) {
       for (const env of [{ EMAIL, ...SES }, { EMAIL }]) {
-        const err = await sendRawMail(env, { ...MAIL, sesOnlyHeaders }).catch((e: unknown) => e);
+        // oxlint-disable-next-line eslint/no-await-in-loop -- each bad header is tried on its own, so the spies below show that none of them sent anything
+        const err = await sendRawMail(env, { ...MAIL, sesOnlyHeaders }).catch(
+          // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejection reason is unknown until this test says what it is
+          (error: unknown) => error
+        );
+
         expect(err).toBeInstanceOf(MailError);
         expect(err).toMatchObject({
           transport: "ses",
@@ -225,11 +312,13 @@ describe("sendRawMail", () => {
           code: "validation_error",
         });
         // Never the value, which can carry what the message is about.
+        // SAFETY: the assertion above checked that `err` is a MailError.
         expect((err as MailError).message).not.toContain("eve@");
       }
     }
-    expect(requests).toEqual([]);
-    expect(sent).toEqual([]);
+
+    expect(requests).toStrictEqual([]);
+    expect(sent).toStrictEqual([]);
   });
 
   it("refuses a message without recipients on either transport", async () => {
@@ -244,12 +333,12 @@ describe("sendRawMail", () => {
       transport: "email-service",
       code: "validation_error",
     });
-    expect(requests).toEqual([]);
-    expect(sent).toEqual([]);
+    expect(requests).toStrictEqual([]);
+    expect(sent).toStrictEqual([]);
   });
 });
 
-describe("sendRawWithSes", () => {
+describe(sendRawWithSes, () => {
   it("names the configuration set, and sends a large message that is not all ASCII intact", async () => {
     const requests = fakeSes();
     // Over two of the slices the base64 encoding goes in, with characters of two, three and four bytes across them.
@@ -258,45 +347,72 @@ describe("sendRawWithSes", () => {
     await sendRawWithSes(
       SES_CONFIG,
       { from: "a@example.com", recipients: ["b@example.org"], raw },
-      { configurationSet: " newsletter " },
+      { configurationSet: " newsletter " }
     );
     const [request] = requests;
-    expect(request!.body.ConfigurationSetName).toBe("newsletter");
-    expect(request!.body.EmailTags).toBeUndefined();
-    expect(Buffer.byteLength(raw)).toBeGreaterThan(2 * 0x8000);
-    expect(decoded(request!.body.Content.Raw.Data)).toBe(raw);
+    expect(request?.body.ConfigurationSetName).toBe("newsletter");
+    expect(request?.body.EmailTags).toBeUndefined();
+    expect(Buffer.byteLength(raw)).toBeGreaterThan(2 * 0x80_00);
+    expect(decoded(request?.body.Content.Raw.Data ?? "")).toBe(raw);
   });
 
   it("takes a folded SES-only header as it is", async () => {
     const requests = fakeSes();
     await sendRawWithSes(SES_CONFIG, {
       ...MAIL,
-      sesOnlyHeaders: { Autocrypt: "addr=a@b; keydata=\r\n\tAAAA", "X-Two": "2" },
+      sesOnlyHeaders: {
+        Autocrypt: "addr=a@b; keydata=\r\n\tAAAA",
+        "X-Two": "2",
+      },
     });
-    expect(decoded(requests[0]!.body.Content.Raw.Data)).toBe(
-      `Autocrypt: addr=a@b; keydata=\r\n\tAAAA\r\nX-Two: 2\r\n${RAW}`,
+    expect(decoded(requests[0]?.body.Content.Raw.Data ?? "")).toBe(
+      `Autocrypt: addr=a@b; keydata=\r\n\tAAAA\r\nX-Two: 2\r\n${RAW}`
     );
   });
 });
 
-describe("sendRawWithBinding", () => {
+describe(sendRawWithBinding, () => {
   it("says how many recipients took the message when the binding fails partway, never who", async () => {
-    const { sent, EMAIL } = binding({
+    const { EMAIL } = binding({
       at: 2,
       error: Object.assign(new Error("rate limit for dave@example.org"), {
         code: "E_RATE_LIMIT_EXCEEDED",
       }),
     });
-    const err = await sendRawWithBinding(EMAIL, MAIL).catch((e: unknown) => e);
+
+    const err = await sendRawWithBinding(EMAIL, MAIL).catch(
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejection reason is unknown until this test says what it is
+      (error: unknown) => error
+    );
+
     expect(err).toBeInstanceOf(MailError);
     expect(err).toMatchObject({
       transport: "email-service",
       status: undefined,
       code: "E_RATE_LIMIT_EXCEEDED",
     });
-    const { message, cause } = err as MailError;
+    // SAFETY: the assertion above checked that `err` is a MailError.
+    const { message } = err as MailError;
     expect(message).toContain("2 of 3 recipients");
-    expect(message).not.toMatch(/@/);
+    expect(message).not.toMatch(/@/u);
+  });
+
+  it("keeps the binding's own error as the cause, and stops where it failed", async () => {
+    const { sent, EMAIL } = binding({
+      at: 2,
+      error: Object.assign(new Error("rate limit for dave@example.org"), {
+        code: "E_RATE_LIMIT_EXCEEDED",
+      }),
+    });
+
+    const err = await sendRawWithBinding(EMAIL, MAIL).catch(
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejection reason is unknown until this test says what it is
+      (error: unknown) => error
+    );
+
+    // SAFETY: `sendRawWithBinding` rejects with a MailError, as the test above checks.
+    const { cause } = err as MailError;
+    // SAFETY: the binding was made to fail with the Error built above, which becomes the cause.
     expect((cause as Error).message).toBe("rate limit for dave@example.org");
     expect(sent).toHaveLength(2);
   });
@@ -304,19 +420,22 @@ describe("sendRawWithBinding", () => {
   it("answers the binding's own failure when the first send fails", async () => {
     const { sent, EMAIL } = binding({
       at: 0,
-      error: Object.assign(new Error("daily limit"), { code: "E_DAILY_LIMIT_EXCEEDED" }),
+      error: Object.assign(new Error("daily limit"), {
+        code: "E_DAILY_LIMIT_EXCEEDED",
+      }),
     });
+
     await expect(sendRawWithBinding(EMAIL, MAIL)).rejects.toMatchObject({
       name: "MailError",
       transport: "email-service",
       code: "E_DAILY_LIMIT_EXCEEDED",
       message: "daily limit",
     });
-    expect(sent).toEqual([]);
+    expect(sent).toStrictEqual([]);
   });
 });
 
-describe("signAwsRequest", () => {
+describe(signAwsRequest, () => {
   it("signs AWS's own example: S3's GET Object", async () => {
     // From "Signature Calculations for the Authorization Header" in the Amazon S3 API reference.
     const headers = await signAwsRequest(
@@ -332,11 +451,13 @@ describe("signAwsRequest", () => {
         region: "us-east-1",
         service: "s3",
       },
-      new Date("2013-05-24T00:00:00Z"),
+      new Date("2013-05-24T00:00:00Z")
     );
-    expect(headers).toEqual({
+
+    expect(headers).toStrictEqual({
       Range: "bytes=0-9",
-      "x-amz-content-sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "x-amz-content-sha256":
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "x-amz-date": "20130524T000000Z",
       Authorization:
         "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request, " +
@@ -347,10 +468,13 @@ describe("signAwsRequest", () => {
 
   it("signs SES's call as the steps of Signature Version 4 compute it by hand", async () => {
     const body = '{"FromEmailAddress":"a@example.com"}';
+
     const headers = await signAwsRequest(
       {
         method: "POST",
-        url: new URL("https://email.eu-west-1.amazonaws.com/v2/email/outbound-emails"),
+        url: new URL(
+          "https://email.eu-west-1.amazonaws.com/v2/email/outbound-emails"
+        ),
         headers: { "content-type": "application/json" },
         body,
       },
@@ -360,8 +484,9 @@ describe("signAwsRequest", () => {
         region: "eu-west-1",
         service: "ses",
       },
-      new Date("2026-11-07T12:34:56.789Z"),
+      new Date("2026-11-07T12:34:56.789Z")
     );
+
     const canonical = [
       "POST",
       "/v2/email/outbound-emails",
@@ -374,20 +499,24 @@ describe("signAwsRequest", () => {
       "content-type;host;x-amz-content-sha256;x-amz-date",
       sha256(body),
     ].join("\n");
+
     const toSign = [
       "AWS4-HMAC-SHA256",
       "20261107T123456Z",
       "20261107/eu-west-1/ses/aws4_request",
       sha256(canonical),
     ].join("\n");
-    const key = ["20261107", "eu-west-1", "ses", "aws4_request"].reduce<Buffer | string>(
-      (k, part) => createHmac("sha256", k).update(part).digest(),
-      "AWS4secret",
-    );
+
+    let key: Buffer | string = "AWS4secret";
+
+    for (const part of ["20261107", "eu-west-1", "ses", "aws4_request"]) {
+      key = createHmac("sha256", key).update(part).digest();
+    }
+
     const signature = createHmac("sha256", key).update(toSign).digest("hex");
     expect(headers.Authorization).toBe(
       "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261107/eu-west-1/ses/aws4_request, " +
-        `SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=${signature}`,
+        `SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=${signature}`
     );
   });
 });

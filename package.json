@@ -11,6 +11,7 @@
     "lint": "oxlint",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
+    "fix": "ultracite fix -A unicorn/catch-error-name -A typescript/consistent-type-definitions -A unicorn/prefer-dom-node-append -A unicorn/prefer-dom-node-dataset -A unicorn/prefer-query-selector -A unicorn/prefer-at -A unicorn/prefer-set-has -A unicorn/prefer-spread -A unicorn/prefer-bigint-literals -A unicorn/prefer-import-meta-properties -A unicorn/prefer-number-coercion -A unicorn/prefer-type-error -A unicorn/prefer-regexp-test -A unicorn/text-encoding-identifier-case -A unicorn/no-useless-undefined -A vitest/prefer-describe-function-title",
     "test": "pnpm -r run test && vitest run --dir scripts",
     "check:manifests": "node scripts/check-publish-manifests.ts",
     "check:packages": "node scripts/check-packed-imports.ts",
@@ -26,6 +27,7 @@
     "oxfmt": "0.75.0",
     "oxlint": "1.90.0",
     "typescript": "7.0.2",
+    "ultracite": "8.1.1",
     "vitest": "5.0.5"
   },
   "engines": {

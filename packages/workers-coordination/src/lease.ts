@@ -5,7 +5,10 @@
  * a holder whose lease expired cannot end the next holder's.
  */
 import { DurableObject } from "cloudflare:workers";
-import { type DurableObjectNamespaceLike, forget, objectFor } from "./objects.js";
+
+import { LeaseLostError } from "./lease-lost-error.js";
+import { forget, objectFor } from "./objects.js";
+import type { DurableObjectNamespaceLike } from "./objects.js";
 
 /** How long a lease lasts. */
 export interface LeaseOptions {
@@ -34,11 +37,11 @@ export interface StoredLease {
 /** The methods of a `LeaseLock` stub that the client calls. */
 export interface LeaseLockStub {
   /** Grants the lease, or null while another holder has it (`LeaseLock.acquire`). */
-  acquire(options: LeaseOptions): Promise<LeaseGrant | null>;
+  acquire: (options: LeaseOptions) => Promise<LeaseGrant | null>;
   /** The lease's new `expiresAt`, or null when it has ended (`LeaseLock.renew`). */
-  renew(token: string): Promise<number | null>;
+  renew: (token: string) => Promise<number | null>;
   /** Ends the lease; false when it had already ended (`LeaseLock.release`). */
-  release(token: string): Promise<boolean>;
+  release: (token: string) => Promise<boolean>;
 }
 
 /** A lease `acquireLease()` took. */
@@ -53,55 +56,56 @@ export interface Lease {
    * Extends the lease by its `ttlMs` from now. Throws a `LeaseLostError` when the lease has
    * already ended: it expired, or it was released.
    */
-  renew(): Promise<void>;
+  renew: () => Promise<void>;
   /** Ends the lease. False when it had already ended, which leaves the key as it is. */
-  release(): Promise<boolean>;
-}
-
-/** The lease ended before its holder renewed it: another caller may hold the key now. */
-export class LeaseLostError extends Error {
-  override readonly name = "LeaseLostError";
-  /** The key whose lease ended. */
-  readonly key: string;
-
-  constructor(key: string) {
-    super(`The lease on "${key}" has ended`);
-    this.key = key;
-  }
+  release: () => Promise<boolean>;
 }
 
 /** Throws a `RangeError` for a `ttlMs` that is not a whole number of milliseconds above 0. */
-export function assertLeaseOptions(options: LeaseOptions): void {
+export const assertLeaseOptions = (options: LeaseOptions): void => {
   const { ttlMs } = options ?? {};
-  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1)
-    throw new RangeError(`ttlMs must be a whole number of milliseconds, 1 or more, not ${ttlMs}`);
-}
+
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) {
+    throw new RangeError(
+      `ttlMs must be a whole number of milliseconds, 1 or more, not ${ttlMs}`
+    );
+  }
+};
 
 /** Whether `token` holds `lease` at `now`. A lease has ended at its `expiresAt`. */
-export function holds(lease: StoredLease | undefined, token: string, now: number): boolean {
-  return lease !== undefined && lease.token === token && lease.expiresAt > now;
-}
+export const holds = (
+  lease: StoredLease | undefined,
+  token: string,
+  now: number
+): boolean =>
+  lease !== undefined && lease.token === token && lease.expiresAt > now;
 
 /** The new lease for `token` when `current` is free or has ended at `now`; null while it is held. */
-export function takeLease(
+export const takeLease = (
   current: StoredLease | undefined,
   ttlMs: number,
   now: number,
-  token: string,
-): StoredLease | null {
-  if (current && current.expiresAt > now) return null;
+  token: string
+): StoredLease | null => {
+  if (current && current.expiresAt > now) {
+    return null;
+  }
+
   return { token, expiresAt: now + ttlMs, ttlMs };
-}
+};
 
 /** `current` extended by its `ttlMs` from `now` when `token` holds it; null when it does not. */
-export function renewLease(
+export const renewLease = (
   current: StoredLease | undefined,
   token: string,
-  now: number,
-): StoredLease | null {
-  if (!current || !holds(current, token, now)) return null;
+  now: number
+): StoredLease | null => {
+  if (!current || !holds(current, token, now)) {
+    return null;
+  }
+
   return { ...current, expiresAt: now + current.ttlMs };
-}
+};
 
 const LEASE = "lease";
 
@@ -113,32 +117,54 @@ export class LeaseLock extends DurableObject<unknown> {
   /** Grants the lease when it is free or has ended; null while another holder has it. */
   async acquire(options: LeaseOptions): Promise<LeaseGrant | null> {
     assertLeaseOptions(options);
-    const lease = takeLease(this.#stored(), options.ttlMs, Date.now(), crypto.randomUUID());
-    if (!lease) return null;
+
+    const lease = takeLease(
+      this.#stored(),
+      options.ttlMs,
+      Date.now(),
+      crypto.randomUUID()
+    );
+
+    if (!lease) {
+      return null;
+    }
+
     await this.#store(lease);
+
     return { token: lease.token, expiresAt: lease.expiresAt };
   }
 
   /** The lease's new `expiresAt` when `token` holds it; null when it has ended. */
   async renew(token: string): Promise<number | null> {
     const lease = renewLease(this.#stored(), token, Date.now());
-    if (!lease) return null;
+
+    if (!lease) {
+      return null;
+    }
+
     await this.#store(lease);
+
     return lease.expiresAt;
   }
 
   /** Ends the lease when `token` holds it; false when it has already ended. */
   async release(token: string): Promise<boolean> {
-    if (!holds(this.#stored(), token, Date.now())) return false;
+    if (!holds(this.#stored(), token, Date.now())) {
+      return false;
+    }
+
     await forget(this.ctx.storage);
+
     return true;
   }
 
   /** The lease has ended: the object keeps nothing for a key nobody holds. */
   async alarm(): Promise<void> {
     const lease = this.#stored();
-    if (lease && lease.expiresAt > Date.now()) await this.ctx.storage.setAlarm(lease.expiresAt);
-    else await forget(this.ctx.storage);
+
+    await (lease && lease.expiresAt > Date.now()
+      ? this.ctx.storage.setAlarm(lease.expiresAt)
+      : forget(this.ctx.storage));
   }
 
   #stored(): StoredLease | undefined {
@@ -155,16 +181,24 @@ export class LeaseLock extends DurableObject<unknown> {
  * Takes the lease on `key` in `namespace`, a binding of `LeaseLock`, for `ttlMs`. Null while
  * another holder has it.
  */
-export async function acquireLease<Id>(
+export const acquireLease = async <Id>(
   namespace: DurableObjectNamespaceLike<Id, LeaseLockStub>,
   key: string,
-  options: LeaseOptions,
-): Promise<Lease | null> {
+  options: LeaseOptions
+): Promise<Lease | null> => {
   assertLeaseOptions(options);
-  const grant = await objectFor(namespace, key).acquire({ ttlMs: options.ttlMs });
-  if (!grant) return null;
+
+  const grant = await objectFor(namespace, key).acquire({
+    ttlMs: options.ttlMs,
+  });
+
+  if (!grant) {
+    return null;
+  }
+
   const { token } = grant;
-  let expiresAt = grant.expiresAt;
+  let { expiresAt } = grant;
+
   return {
     key,
     token,
@@ -173,9 +207,13 @@ export async function acquireLease<Id>(
     },
     async renew() {
       const renewed = await objectFor(namespace, key).renew(token);
-      if (renewed === null) throw new LeaseLostError(key);
+
+      if (renewed === null) {
+        throw new LeaseLostError(key);
+      }
+
       expiresAt = renewed;
     },
     release: () => objectFor(namespace, key).release(token),
   };
-}
+};

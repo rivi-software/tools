@@ -60,5 +60,6 @@ scope:repo:
           - .editorconfig
           - .gitignore
           - .node-version
-          - .oxfmtrc.json
-          - .oxlintrc.json
+          - .claude/**
+          - oxfmt.config.ts
+          - oxlint.config.ts
