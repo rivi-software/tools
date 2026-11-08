@@ -111,17 +111,7 @@ runs:
         allowed_non_write_users: "*"
         settings: '{"disableAllHooks":true}'
         claude_args: >-
-          --model ${{ inputs.model }}
-          --effort medium
-          --max-turns 15
-          --max-budget-usd 2
-          --setting-sources user
-          --strict-mcp-config
-          --permission-mode default
-          --add-dir ${{ steps.pr.outputs.dir }}
-          --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)"
-          --allowedTools "Read,Glob,Grep"
-          --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"labels":{"type":"array","items":{"type":"string"}}},"required":["summary","labels"],"additionalProperties":false}'
+          --model ${{ inputs.model }} --effort medium --max-turns 15 --max-budget-usd 2 --setting-sources user --strict-mcp-config --permission-mode default --add-dir ${{ steps.pr.outputs.dir }} --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)" --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"summary":{"type":"string"},"labels":{"type":"array","items":{"type":"string"}}},"required":["summary","labels"],"additionalProperties":false}'
         prompt: |
           Describe pull request #${{ inputs.pull-request }} in ${{ github.repository }} for whoever reviews it: head ${{ inputs.head-sha }}, into ${{ steps.pr.outputs.base_ref }}. The head commit is checked out here, shallow; read any file in it for context. In ${{ steps.pr.outputs.dir }}:
           - pull-request.json: the title, description, author, labels, commits and changed files

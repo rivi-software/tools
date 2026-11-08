@@ -4,16 +4,18 @@
  */
 import {
   acquireLease,
-  type Lease,
-  LeaseLock,
   LeaseLostError,
   rateLimit,
-  RateLimiter,
-  type RateLimitResult,
   resetRateLimit,
 } from "../../src/index.js";
+import type {
+  Lease,
+  LeaseLock,
+  RateLimiter,
+  RateLimitResult,
+} from "../../src/index.js";
 
-export { LeaseLock, RateLimiter };
+export { LeaseLock, RateLimiter } from "../../src/index.js";
 
 interface Env {
   RATE_LIMITER: DurableObjectNamespace<RateLimiter>;
@@ -22,21 +24,39 @@ interface Env {
 
 export default {
   async fetch(request, env) {
-    const result: RateLimitResult = await rateLimit(env.RATE_LIMITER, "sign-in:account-1", {
-      limit: 5,
-      windowSeconds: 15 * 60,
-    });
-    if (!result.allowed) return new Response("Too many attempts", { status: 429 });
+    const result: RateLimitResult = await rateLimit(
+      env.RATE_LIMITER,
+      "sign-in:account-1",
+      {
+        limit: 5,
+        windowSeconds: 15 * 60,
+      }
+    );
+
+    if (!result.allowed) {
+      return new Response("Too many attempts", { status: 429 });
+    }
+
     await resetRateLimit(env.RATE_LIMITER, "sign-in:account-1");
 
-    const lease: Lease | null = await acquireLease(env.LOCKS, "provision:customer-1", {
-      ttlMs: 60_000,
-    });
-    if (!lease) return new Response("Busy", { status: 409 });
+    const lease: Lease | null = await acquireLease(
+      env.LOCKS,
+      "provision:customer-1",
+      {
+        ttlMs: 60_000,
+      }
+    );
+
+    if (!lease) {
+      return new Response("Busy", { status: 409 });
+    }
+
     try {
       await lease.renew();
     } catch (error) {
-      if (!(error instanceof LeaseLostError)) throw error;
+      if (!(error instanceof LeaseLostError)) {
+        throw error;
+      }
     } finally {
       await lease.release();
     }

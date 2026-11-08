@@ -7,14 +7,14 @@
 
 import { appendFileSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+
 import {
   COMMENT_MARKER,
   formatFindingsComment,
   formatFindingsSummary,
   parseFindings,
-  type Revision,
-  type SemgrepFinding,
 } from "./index.js";
+import type { Revision, SemgrepFinding } from "./index.js";
 
 export const USAGE = `Usage: semgrep-github-report --mode pr|summary [options]
 
@@ -36,20 +36,33 @@ const FORBIDDEN_HINT =
 
 type Env = Record<string, string | undefined>;
 
-type Options = {
+interface Options {
   mode: "pr" | "summary";
   findings: string;
   pr?: string;
   sha?: string;
-};
+}
 
-type IssueComment = { id: number; body?: string; html_url?: string };
+interface IssueComment {
+  id: number;
+  body?: string;
+  html_url?: string;
+}
 
-type GitHub = { apiUrl: string; token: string };
+interface GitHub {
+  apiUrl: string;
+  token: string;
+}
+
+/** The JSON a request carries, which is only ever the body of the findings comment. */
+interface CommentBody {
+  body: string;
+}
 
 /** The command's options, or undefined when it is asked for its help. */
-function parseOptions(argv: string[]): Options | undefined {
+const parseOptions = (argv: string[]): Options | undefined => {
   let values;
+
   try {
     ({ values } = parseArgs({
       args: argv,
@@ -62,124 +75,171 @@ function parseOptions(argv: string[]): Options | undefined {
       },
     }));
   } catch (error) {
-    throw new Error(`${(error as Error).message}\n\n${USAGE}`);
+    // SAFETY: parseArgs throws an Error for an option it cannot read.
+    throw new Error(`${(error as Error).message}\n\n${USAGE}`, {
+      cause: error,
+    });
   }
+
   const { mode, findings, pr, sha, help } = values;
+
   if (help) {
     return undefined;
   }
+
   if (mode !== "pr" && mode !== "summary") {
     throw new Error(`Invalid --mode ${mode ?? "(missing)"}\n\n${USAGE}`);
   }
-  return { mode, findings, pr, sha };
-}
 
-function requireEnv(env: Env, name: string, option?: string): string {
+  return { mode, findings, pr, sha };
+};
+
+const requireEnv = (env: Env, name: string, option?: string): string => {
   const value = env[name];
+
   if (!value) {
     throw new Error(
-      `Missing required environment variable: ${name}${option ? ` (or pass ${option})` : ""}`,
+      `Missing required environment variable: ${name}${option ? ` (or pass ${option})` : ""}`
     );
   }
-  return value;
-}
 
-function loadFindings(path: string): SemgrepFinding[] {
+  return value;
+};
+
+const loadFindings = (path: string): SemgrepFinding[] => {
   try {
-    return parseFindings(readFileSync(path, "utf8"));
+    return parseFindings(readFileSync(path, "utf-8"));
   } catch (error) {
-    throw new Error(`Cannot read Semgrep findings from ${path}: ${(error as Error).message}`);
+    // SAFETY: readFileSync, JSON.parse and parseFindings each throw an Error.
+    throw new Error(
+      `Cannot read Semgrep findings from ${path}: ${(error as Error).message}`,
+      { cause: error }
+    );
   }
-}
+};
 
 /** `--pr`, or else the pull request of the event that started the workflow. */
-function pullRequestNumber(option: string | undefined, env: Env): number {
+const pullRequestNumber = (option: string | undefined, env: Env): number => {
   let value: unknown = option;
+
   if (value === undefined && env.GITHUB_EVENT_PATH) {
-    const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")) as {
+    // SAFETY: GitHub Actions writes the event as JSON; `Number(value)` below checks what it found.
+    const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf-8")) as {
       pull_request?: { number?: unknown };
     };
+
     value = event.pull_request?.number;
   }
+
   if (value === undefined) {
-    throw new Error("No pull request: pass --pr <number>, or run on a pull_request event");
+    throw new Error(
+      "No pull request: pass --pr <number>, or run on a pull_request event"
+    );
   }
+
   const number = Number(value);
+
   if (!Number.isInteger(number) || number < 1) {
     throw new Error(`Invalid pull request number: ${String(value)}`);
   }
-  return number;
-}
 
-async function githubJson<T>(
+  return number;
+};
+
+const githubJson = async <T>(
   github: GitHub,
   method: string,
   path: string,
-  body?: unknown,
-): Promise<T> {
+  body?: CommentBody
+): Promise<T> => {
   const url = `${github.apiUrl}${path}`;
+
+  const headers = new Headers({
+    Authorization: `Bearer ${github.token}`,
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+  });
+
+  if (body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const response = await fetch(url, {
     method,
-    headers: {
-      Authorization: `Bearer ${github.token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-    },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   }).catch((error: Error) => {
     // fetch says only "fetch failed"; why, such as ECONNREFUSED, is in its cause.
-    const cause = error.cause instanceof Error ? ` (${error.cause.message})` : "";
+    const cause =
+      error.cause instanceof Error ? ` (${error.cause.message})` : "";
+
     throw new Error(`GitHub API ${method} ${url}: ${error.message}${cause}`);
   });
+
   if (!response.ok) {
-    const hint = response.status === 403 && method !== "GET" ? `\n${FORBIDDEN_HINT}` : "";
+    const hint =
+      response.status === 403 && method !== "GET" ? `\n${FORBIDDEN_HINT}` : "";
+
     throw new Error(
-      `GitHub API ${response.status} ${method} ${path}: ${await response.text()}${hint}`,
+      `GitHub API ${response.status} ${method} ${path}: ${await response.text()}${hint}`
     );
   }
+
+  // SAFETY: each caller names the type GitHub's REST API answers for the path it asks for.
   return (await response.json()) as T;
-}
+};
 
 /** The first comment on the pull request that carries the marker, looking 100 at a time. */
-async function findSemgrepPrComment(
+const findSemgrepPrComment = async (
   github: GitHub,
   repo: string,
-  prNumber: number,
-): Promise<IssueComment | undefined> {
-  for (let page = 1; ; page++) {
+  prNumber: number
+): Promise<IssueComment | undefined> => {
+  for (let page = 1; ; page += 1) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- each page is asked for only when the one before it was full
     const comments = await githubJson<IssueComment[]>(
       github,
       "GET",
-      `/repos/${repo}/issues/${prNumber}/comments?per_page=100&page=${page}`,
+      `/repos/${repo}/issues/${prNumber}/comments?per_page=100&page=${page}`
     );
-    const comment = comments.find((comment) => comment.body?.includes(COMMENT_MARKER));
-    if (comment || comments.length < 100) {
-      return comment;
+
+    const marked = comments.find((comment) =>
+      comment.body?.includes(COMMENT_MARKER)
+    );
+
+    if (marked || comments.length < 100) {
+      return marked;
     }
   }
-}
+};
 
 /** Runs the command with these arguments and environment; resolves to what it prints. */
-export async function main(argv: string[], env: Env): Promise<string> {
+export const main = async (argv: string[], env: Env): Promise<string> => {
   const options = parseOptions(argv);
+
   if (!options) {
     return USAGE;
   }
+
   const repo = requireEnv(env, "GITHUB_REPOSITORY");
+
   const revision: Revision = {
     repository: repo,
     sha: options.sha || requireEnv(env, "GITHUB_SHA", "--sha <commit>"),
     serverUrl: env.GITHUB_SERVER_URL || undefined,
   };
+
   const findings = loadFindings(options.findings);
 
   if (options.mode === "summary") {
     const summary = formatFindingsSummary(findings, revision);
+
     if (!env.GITHUB_STEP_SUMMARY) {
       return summary;
     }
+
     appendFileSync(env.GITHUB_STEP_SUMMARY, summary);
+
     return `Listed ${findings.length} finding(s) in the job summary.`;
   }
 
@@ -187,27 +247,33 @@ export async function main(argv: string[], env: Env): Promise<string> {
     apiUrl: env.GITHUB_API_URL || "https://api.github.com",
     token: requireEnv(env, "GITHUB_TOKEN"),
   };
+
   const prNumber = pullRequestNumber(options.pr, env);
   const body = formatFindingsComment(findings, revision);
   // A pull request without findings gets no comment, but one it already has says they are gone.
   const existing = await findSemgrepPrComment(github, repo, prNumber);
+
   if (existing) {
     const updated = await githubJson<IssueComment>(
       github,
       "PATCH",
       `/repos/${repo}/issues/comments/${existing.id}`,
-      { body },
+      { body }
     );
+
     return `Updated ${updated.html_url} with ${findings.length} finding(s).`;
   }
+
   if (findings.length === 0) {
     return `No findings, and no comment on #${prNumber} to update.`;
   }
+
   const created = await githubJson<IssueComment>(
     github,
     "POST",
     `/repos/${repo}/issues/${prNumber}/comments`,
-    { body },
+    { body }
   );
+
   return `Commented ${created.html_url} with ${findings.length} finding(s).`;
-}
+};

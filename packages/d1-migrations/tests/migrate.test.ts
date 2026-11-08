@@ -1,91 +1,136 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { D1MigrationError, migrateD1, type D1DatabaseLike } from "../src/index.js";
+
+import { D1MigrationError, migrateD1 } from "../src/index.js";
+import type { D1DatabaseLike } from "../src/index.js";
 import { openDatabase } from "./helpers.js";
 
-const MIGRATIONS = [
-  { name: "0001_init.sql", queries: ["CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)"] },
-  {
-    name: "0002_seed.sql",
-    queries: ["INSERT INTO a (v) VALUES ('x')", "INSERT INTO a (v) VALUES ('y')"],
-  },
-  { name: "0003_index.sql", queries: ["CREATE INDEX a_v ON a (v)"] },
-];
+const INIT = {
+  name: "0001_init.sql",
+  queries: ["CREATE TABLE a (id INTEGER PRIMARY KEY, v TEXT)"],
+};
+
+const SEED = {
+  name: "0002_seed.sql",
+  queries: ["INSERT INTO a (v) VALUES ('x')", "INSERT INTO a (v) VALUES ('y')"],
+};
+
+const INDEX = {
+  name: "0003_index.sql",
+  queries: ["CREATE INDEX a_v ON a (v)"],
+};
+
+const MIGRATIONS = [INIT, SEED, INDEX];
 
 let open: Awaited<ReturnType<typeof openDatabase>>[] = [];
-afterEach(async () => {
-  await Promise.all(open.map((database) => database.dispose()));
-  open = [];
-});
-async function database() {
+
+const database = async () => {
   const opened = await openDatabase();
   open.push(opened);
+
   return opened.db;
-}
+};
 
-async function recorded(db: Awaited<ReturnType<typeof database>>, table = "d1_migrations") {
+const recorded = async (
+  db: Awaited<ReturnType<typeof database>>,
+  table = "d1_migrations"
+) => {
   const { results } = await db
-    .prepare(`SELECT id, name FROM "${table.replace(/"/g, '""')}" ORDER BY id`)
+    .prepare(
+      `SELECT id, name FROM "${table.replaceAll('"', '""')}" ORDER BY id`
+    )
     .all<{ id: number; name: string }>();
-  return results;
-}
 
-describe("migrateD1", () => {
+  return results;
+};
+
+describe(migrateD1, () => {
+  afterEach(async () => {
+    await Promise.all(open.map((opened) => opened.dispose()));
+    open = [];
+  });
+
   it("applies every migration in order to a new database, and records each", async () => {
     const db = await database();
-    expect(await migrateD1(db, { migrations: MIGRATIONS })).toEqual({
+    await expect(
+      migrateD1(db, { migrations: MIGRATIONS })
+    ).resolves.toStrictEqual({
       applied: ["0001_init.sql", "0002_seed.sql", "0003_index.sql"],
     });
-    expect(await recorded(db)).toEqual([
+    await expect(recorded(db)).resolves.toStrictEqual([
       { id: 1, name: "0001_init.sql" },
       { id: 2, name: "0002_seed.sql" },
       { id: 3, name: "0003_index.sql" },
     ]);
-    expect((await db.prepare("SELECT v FROM a ORDER BY id").all()).results).toEqual([
-      { v: "x" },
-      { v: "y" },
-    ]);
+    const rows = await db.prepare("SELECT v FROM a ORDER BY id").all();
+    expect(rows.results).toStrictEqual([{ v: "x" }, { v: "y" }]);
   });
 
   it("applies only what the database lacks, and nothing on a second call", async () => {
     const db = await database();
     await migrateD1(db, { migrations: MIGRATIONS.slice(0, 1) });
-    expect(await migrateD1(db, { migrations: MIGRATIONS })).toEqual({
+    await expect(
+      migrateD1(db, { migrations: MIGRATIONS })
+    ).resolves.toStrictEqual({
       applied: ["0002_seed.sql", "0003_index.sql"],
     });
-    expect(await migrateD1(db, { migrations: MIGRATIONS })).toEqual({ applied: [] });
-    expect(await recorded(db)).toHaveLength(3);
+    await expect(
+      migrateD1(db, { migrations: MIGRATIONS })
+    ).resolves.toStrictEqual({
+      applied: [],
+    });
+    await expect(recorded(db)).resolves.toHaveLength(3);
   });
 
   it("records in the table it is given", async () => {
     const db = await database();
-    await migrateD1(db, { table: 'schema "migrations"', migrations: MIGRATIONS.slice(0, 1) });
-    expect(await recorded(db, 'schema "migrations"')).toEqual([{ id: 1, name: "0001_init.sql" }]);
+    await migrateD1(db, {
+      table: 'schema "migrations"',
+      migrations: MIGRATIONS.slice(0, 1),
+    });
+    await expect(recorded(db, 'schema "migrations"')).resolves.toStrictEqual([
+      { id: 1, name: "0001_init.sql" },
+    ]);
   });
 
   it("leaves nothing of a migration that fails, and says which one failed", async () => {
     const db = await database();
+
     const broken = {
       name: "0002_broken.sql",
-      queries: ["CREATE TABLE b (id INTEGER)", "INSERT INTO missing VALUES (1)"],
+      queries: [
+        "CREATE TABLE b (id INTEGER)",
+        "INSERT INTO missing VALUES (1)",
+      ],
     };
-    const error = await migrateD1(db, {
-      migrations: [MIGRATIONS[0]!, broken, MIGRATIONS[2]!],
+
+    const failure = await migrateD1(db, {
+      migrations: [INIT, broken, INDEX],
+      // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejection reason is unknown until this test says what it is
     }).catch((error: unknown) => error);
-    expect(error).toBeInstanceOf(D1MigrationError);
-    expect(error).toMatchObject({
+
+    expect(failure).toBeInstanceOf(D1MigrationError);
+    expect(failure).toMatchObject({
       name: "D1MigrationError",
       migration: "0002_broken.sql",
       applied: ["0001_init.sql"],
       message: expect.stringContaining(
-        "D1 migration 0002_broken.sql failed: D1_ERROR: no such table: missing",
+        "D1 migration 0002_broken.sql failed: D1_ERROR: no such table: missing"
       ),
     });
-    expect(await recorded(db)).toEqual([{ id: 1, name: "0001_init.sql" }]);
-    const tables = await db.prepare("SELECT name FROM sqlite_master WHERE name = 'b'").all();
-    expect(tables.results).toEqual([]);
+    await expect(recorded(db)).resolves.toStrictEqual([
+      { id: 1, name: "0001_init.sql" },
+    ]);
+
+    const tables = await db
+      .prepare("SELECT name FROM sqlite_master WHERE name = 'b'")
+      .all();
+
+    expect(tables.results).toStrictEqual([]);
 
     // Once the migration is fixed, the next call picks up where this one stopped.
-    expect(await migrateD1(db, { migrations: MIGRATIONS })).toEqual({
+    await expect(
+      migrateD1(db, { migrations: MIGRATIONS })
+    ).resolves.toStrictEqual({
       applied: ["0002_seed.sql", "0003_index.sql"],
     });
   });
@@ -95,51 +140,77 @@ describe("migrateD1", () => {
     await migrateD1(db, { migrations: MIGRATIONS });
     // A call that read the table before the first one wrote it: its first read finds nothing.
     let stale = true;
+
     const late: D1DatabaseLike = {
       prepare: (query) => {
         const statement = db.prepare(query);
-        if (!query.startsWith("SELECT name FROM")) return statement;
+
+        if (!query.startsWith("SELECT name FROM")) {
+          return statement;
+        }
+
         return {
           bind: (...values) => statement.bind(...values),
           run: () => statement.run(),
-          all: async () => {
-            if (!stale) return statement.all();
+          all: () => {
+            if (!stale) {
+              return statement.all();
+            }
+
             stale = false;
-            return { results: [] };
+
+            return Promise.resolve({ results: [] });
           },
         };
       },
-      batch: (statements) => db.batch(statements as Parameters<typeof db.batch>[0]),
+      // SAFETY: every statement here came from `db.prepare` just above, so they are this database's own.
+      batch: (statements) =>
+        db.batch(statements as Parameters<typeof db.batch>[0]),
     };
-    expect(await migrateD1(late, { migrations: MIGRATIONS })).toEqual({ applied: [] });
-    expect(await recorded(db)).toHaveLength(3);
+
+    await expect(
+      migrateD1(late, { migrations: MIGRATIONS })
+    ).resolves.toStrictEqual({
+      applied: [],
+    });
+    await expect(recorded(db)).resolves.toHaveLength(3);
   });
 
   it("applies each migration once when calls overlap", async () => {
     const db = await database();
+
     const results = await Promise.all(
-      Array.from({ length: 4 }, () => migrateD1(db, { migrations: MIGRATIONS })),
+      Array.from({ length: 4 }, () => migrateD1(db, { migrations: MIGRATIONS }))
     );
-    expect(results.flatMap((result) => result.applied).sort()).toEqual(
-      MIGRATIONS.map((migration) => migration.name),
+
+    expect(
+      results.flatMap((result) => result.applied).toSorted()
+    ).toStrictEqual(MIGRATIONS.map((migration) => migration.name));
+    await expect(recorded(db)).resolves.toStrictEqual(
+      MIGRATIONS.map((migration, index) => ({
+        id: index + 1,
+        name: migration.name,
+      }))
     );
-    expect(await recorded(db)).toEqual(
-      MIGRATIONS.map((migration, index) => ({ id: index + 1, name: migration.name })),
-    );
-    expect((await db.prepare("SELECT count(*) AS rows FROM a").all()).results).toEqual([
-      { rows: 2 },
-    ]);
+    const counted = await db.prepare("SELECT count(*) AS rows FROM a").all();
+    expect(counted.results).toStrictEqual([{ rows: 2 }]);
   });
 
   it("leaves alone a migration the database records and the list lacks", async () => {
     const db = await database();
     await migrateD1(db, {
-      migrations: [...MIGRATIONS.slice(0, 1), { name: "0009_newer.sql", queries: [] }],
+      migrations: [
+        ...MIGRATIONS.slice(0, 1),
+        { name: "0009_newer.sql", queries: [] },
+      ],
     });
-    expect(await migrateD1(db, { migrations: MIGRATIONS })).toEqual({
+    await expect(
+      migrateD1(db, { migrations: MIGRATIONS })
+    ).resolves.toStrictEqual({
       applied: ["0002_seed.sql", "0003_index.sql"],
     });
-    expect((await recorded(db)).map((row) => row.name)).toEqual([
+    const rows = await recorded(db);
+    expect(rows.map((row) => row.name)).toStrictEqual([
       "0001_init.sql",
       "0009_newer.sql",
       "0002_seed.sql",

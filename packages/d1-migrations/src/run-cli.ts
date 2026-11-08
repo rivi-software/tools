@@ -1,7 +1,9 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
+
 import { bundleD1Migrations } from "./bundle.js";
-import { checkJournal, updateJournal, type JournalProblem } from "./journal.js";
+import { checkJournal, updateJournal } from "./journal.js";
+import type { JournalProblem } from "./journal.js";
 
 export const USAGE = `Usage:
   d1-migrations bundle --out <file> [--dir <dir>] [--pattern <glob>] [--table <name>]
@@ -18,20 +20,142 @@ export const USAGE = `Usage:
 
 Paths are relative to the current directory, the one with the Wrangler config.`;
 
-type Context = {
+interface Context {
   /** The directory paths are relative to. */
   cwd: string;
   log: (line: string) => void;
   error: (line: string) => void;
+}
+
+/** The command line's flags, as `parseArgs` reads them. */
+interface Flags {
+  out?: string | undefined;
+  dir?: string | undefined;
+  pattern?: string | undefined;
+  table?: string | undefined;
+  journal?: string | undefined;
+  check?: boolean | undefined;
+}
+
+const defaultContext = (): Context => ({
+  cwd: process.cwd(),
+  log: console.log,
+  error: console.error,
+});
+
+const describe = (problem: JournalProblem): string => {
+  if (problem.kind === "edited") {
+    return `${problem.name} was edited after it was recorded.`;
+  }
+
+  if (problem.kind === "deleted") {
+    return `${problem.name} was recorded, and its file is gone.`;
+  }
+
+  return `${problem.name} is not recorded: run d1-migrations journal.`;
+};
+
+const advice = (problems: JournalProblem[]): string =>
+  problems.some((problem) => problem.kind !== "unrecorded")
+    ? "A migration that may have run must stay as it is: put the change in a new migration. If it has run on no database yet, delete its entry from the journal and run d1-migrations journal."
+    : "Run d1-migrations journal, and commit the journal with the migrations.";
+
+/** Reports the problems and the way out of them, and returns the exit code for them. */
+const reportProblems = (
+  context: Context,
+  heading: string,
+  problems: JournalProblem[]
+): number => {
+  context.error(heading);
+
+  for (const problem of problems) {
+    context.error(`  ${describe(problem)}`);
+  }
+
+  context.error(advice(problems));
+
+  return 1;
+};
+
+const runBundle = async (
+  context: Context,
+  flags: Flags,
+  out: string,
+  shown: (file: string) => string
+): Promise<number> => {
+  const result = await bundleD1Migrations({
+    cwd: context.cwd,
+    dir: flags.dir,
+    pattern: flags.pattern,
+    table: flags.table,
+    out,
+  });
+
+  const count = `${result.migrations.length} migration${result.migrations.length === 1 ? "" : "s"}`;
+  context.log(
+    result.changed
+      ? `Bundled ${count} into ${shown(result.out)}.`
+      : `${shown(result.out)} already holds the ${count}.`
+  );
+
+  return 0;
+};
+
+const runJournal = async (
+  context: Context,
+  flags: Flags,
+  shown: (file: string) => string
+): Promise<number> => {
+  const options = {
+    cwd: context.cwd,
+    dir: flags.dir,
+    pattern: flags.pattern,
+    journal: flags.journal,
+  };
+
+  if (flags.check) {
+    const { journal, problems } = await checkJournal(options);
+
+    if (!problems.length) {
+      context.log(`Every migration matches ${shown(journal)}.`);
+
+      return 0;
+    }
+
+    return reportProblems(
+      context,
+      `The migrations disagree with ${shown(journal)}:`,
+      problems
+    );
+  }
+
+  const { journal, added, problems } = await updateJournal(options);
+
+  if (problems.length) {
+    return reportProblems(
+      context,
+      `${shown(journal)} is unchanged. These recorded migrations changed:`,
+      problems
+    );
+  }
+
+  context.log(
+    added.length
+      ? `Recorded in ${shown(journal)}: ${added.join(", ")}.`
+      : `${shown(journal)} already records every migration.`
+  );
+
+  return 0;
 };
 
 /** Runs `d1-migrations` with `args` and returns its exit code. */
-export async function runCli(
+export const runCli = async (
   args: string[],
-  context: Context = { cwd: process.cwd(), log: console.log, error: console.error },
-): Promise<number> {
+  context: Context = defaultContext()
+): Promise<number> => {
   const [command, ...rest] = args;
-  let values;
+  let values: Flags;
+
   try {
     ({ values } = parseArgs({
       args: rest,
@@ -46,71 +170,35 @@ export async function runCli(
       },
     }));
   } catch (error) {
-    context.error(`${error instanceof Error ? error.message : error}\n\n${USAGE}`);
+    context.error(
+      `${error instanceof Error ? error.message : error}\n\n${USAGE}`
+    );
+
     return 2;
   }
-  const source = { cwd: context.cwd, dir: values.dir, pattern: values.pattern };
+
   const shown = (file: string) => path.relative(context.cwd, file) || file;
 
   try {
-    if (command === "bundle" && values.out && !values.journal && !values.check) {
-      const result = await bundleD1Migrations({ ...source, table: values.table, out: values.out });
-      const count = `${result.migrations.length} migration${result.migrations.length === 1 ? "" : "s"}`;
-      context.log(
-        result.changed
-          ? `Bundled ${count} into ${shown(result.out)}.`
-          : `${shown(result.out)} already holds the ${count}.`,
-      );
-      return 0;
+    if (
+      command === "bundle" &&
+      values.out &&
+      !values.journal &&
+      !values.check
+    ) {
+      return await runBundle(context, values, values.out, shown);
     }
+
     if (command === "journal" && !values.out && !values.table) {
-      const options = { ...source, journal: values.journal };
-      if (values.check) {
-        const { journal, problems } = await checkJournal(options);
-        if (!problems.length) {
-          context.log(`Every migration matches ${shown(journal)}.`);
-          return 0;
-        }
-        context.error(`The migrations disagree with ${shown(journal)}:`);
-        for (const problem of problems) context.error(`  ${describe(problem)}`);
-        context.error(advice(problems));
-        return 1;
-      }
-      const { journal, added, problems } = await updateJournal(options);
-      if (problems.length) {
-        context.error(`${shown(journal)} is unchanged. These recorded migrations changed:`);
-        for (const problem of problems) context.error(`  ${describe(problem)}`);
-        context.error(advice(problems));
-        return 1;
-      }
-      context.log(
-        added.length
-          ? `Recorded in ${shown(journal)}: ${added.join(", ")}.`
-          : `${shown(journal)} already records every migration.`,
-      );
-      return 0;
+      return await runJournal(context, values, shown);
     }
   } catch (error) {
     context.error(error instanceof Error ? error.message : String(error));
+
     return 1;
   }
+
   context.error(USAGE);
+
   return 2;
-}
-
-function describe(problem: JournalProblem): string {
-  switch (problem.kind) {
-    case "edited":
-      return `${problem.name} was edited after it was recorded.`;
-    case "deleted":
-      return `${problem.name} was recorded, and its file is gone.`;
-    case "unrecorded":
-      return `${problem.name} is not recorded: run d1-migrations journal.`;
-  }
-}
-
-function advice(problems: JournalProblem[]): string {
-  return problems.some((problem) => problem.kind !== "unrecorded")
-    ? "A migration that may have run must stay as it is: put the change in a new migration. If it has run on no database yet, delete its entry from the journal and run d1-migrations journal."
-    : "Run d1-migrations journal, and commit the journal with the migrations.";
-}
+};

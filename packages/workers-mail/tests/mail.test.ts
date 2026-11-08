@@ -1,5 +1,6 @@
 import { getTelemetryStatus } from "@opencoredev/email-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import {
   MailError,
   canSendMail,
@@ -8,8 +9,8 @@ import {
   sendMail,
   sendWithSes,
   sesMessageId,
-  type Mail,
 } from "../src/index.js";
+import type { Mail } from "../src/index.js";
 
 const SES = {
   SES_REGION: "eu-west-1",
@@ -17,7 +18,11 @@ const SES = {
   SES_SECRET_ACCESS_KEY: "test-secret",
 };
 
-const SES_CONFIG = { region: "eu-west-1", accessKeyId: "k", secretAccessKey: "s" };
+const SES_CONFIG = {
+  region: "eu-west-1",
+  accessKeyId: "k",
+  secretAccessKey: "s",
+};
 
 const MAIL: Mail = {
   from: { email: "support@example.com", name: "Acme Support" },
@@ -31,7 +36,12 @@ const MAIL: Mail = {
     References: "<q0@example.org> <q1@example.org>",
   },
   attachments: [
-    { filename: "log.txt", type: "text/plain", content: btoa("log"), disposition: "attachment" },
+    {
+      filename: "log.txt",
+      type: "text/plain",
+      content: btoa("log"),
+      disposition: "attachment",
+    },
     {
       filename: "logo.png",
       type: "image/png",
@@ -42,67 +52,97 @@ const MAIL: Mail = {
   ],
 };
 
+/** The message the Email SDK's Cloudflare adapter hands the binding; these tests read parts of it. */
+interface BindingMessage {
+  from?: unknown;
+  to?: unknown;
+  bcc?: unknown;
+  replyTo?: unknown;
+  subject?: unknown;
+  text?: unknown;
+  html?: unknown;
+  headers?: unknown;
+  attachments?: unknown;
+}
+
 /** A `send_email` binding that records what it was handed. */
-function binding(fail?: Error & { code?: string }) {
-  const sent: Record<string, unknown>[] = [];
+const binding = (fail?: Error & { code?: string }) => {
+  const sent: BindingMessage[] = [];
+
   return {
     sent,
     EMAIL: {
-      async send(message: Record<string, unknown>) {
-        if (fail) throw fail;
+      // oxlint-disable-next-line eslint/require-await -- the stand-in answers with a promise, as the real send_email binding does
+      async send(message: BindingMessage) {
+        if (fail) {
+          throw fail;
+        }
+
         sent.push(message);
+
         return { messageId: "<cf1@example.com>" };
       },
     },
   };
-}
+};
 
-type SesRequest = {
+interface SesRequest {
   url: string;
   authorization: string;
-  body: Record<string, unknown> & {
+  body: {
     ConfigurationSetName?: string;
     Content: { Simple: { Headers?: { Name: string; Value: string }[] } };
   };
-};
-
-/** SES through a spy on the global `fetch`: answers each send with `answer`, records the request. */
-function fakeSes(
-  answer: () => Response | Promise<Response> = () =>
-    Response.json({ MessageId: "0107-abc-000000" }),
-) {
-  const requests: SesRequest[] = [];
-  const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const request = new Request(input, init);
-    requests.push({
-      url: request.url,
-      authorization: request.headers.get("authorization") ?? "",
-      body: (await request.json()) as SesRequest["body"],
-    });
-    return answer();
-  });
-  return { requests, spy };
 }
 
-const refusal = (status: number, type: string, message: string) =>
-  new Response(JSON.stringify({ message }), {
-    status,
-    headers: {
-      "content-type": "application/json",
-      "x-amzn-ErrorType": `${type}:http://internal.amazon.com/coral/`,
-    },
-  });
+/** SES through a spy on the global `fetch`: answers each send with `answer`, records the request. */
+const fakeSes = (
+  answer: () => Response | Promise<Response> = () =>
+    Response.json({ MessageId: "0107-abc-000000" })
+) => {
+  const requests: SesRequest[] = [];
 
+  const spy = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+
+      requests.push({
+        url: request.url,
+        authorization: request.headers.get("authorization") ?? "",
+        // SAFETY: every request this spy sees is one `sendWithSes` just sent, so its body is that JSON.
+        body: (await request.json()) as SesRequest["body"],
+      });
+
+      return answer();
+    });
+
+  return { requests, spy };
+};
+
+const refusal = (status: number, type: string, message: string) =>
+  Response.json(
+    { message },
+    {
+      status,
+      headers: {
+        "content-type": "application/json",
+        "x-amzn-ErrorType": `${type}:http://internal.amazon.com/coral/`,
+      },
+    }
+  );
+
+// oxlint-disable-next-line vitest/require-top-level-describe -- one hook for every describe in this file
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 
-describe("sendMail", () => {
+describe(sendMail, () => {
   it("sends through the binding while SES has no key, recipients as bare addresses", async () => {
     const { sent, EMAIL } = binding();
     const result = await sendMail({ EMAIL, SES_REGION: "eu-west-1" }, MAIL);
-    expect(result).toEqual({
+    expect(result).toStrictEqual({
       transport: "email-service",
       id: "<cf1@example.com>",
       messageId: "<cf1@example.com>",
@@ -137,29 +177,47 @@ describe("sendMail", () => {
     });
   });
 
-  it("sends through SES once it has a key, signed for its region, and names SES's Message-ID", async () => {
+  it("sends through SES once it has a key, and names SES's Message-ID", async () => {
     const { sent, EMAIL } = binding();
     const ses = fakeSes();
-    const result = await sendMail({ EMAIL, ...SES }, { ...MAIL, tags: { kind: "reply" } });
-    expect(result).toEqual({
+
+    const result = await sendMail(
+      { EMAIL, ...SES },
+      { ...MAIL, tags: { kind: "reply" } }
+    );
+
+    expect(result).toStrictEqual({
       transport: "ses",
       id: "0107-abc-000000",
       messageId: "<0107-abc-000000@eu-west-1.amazonses.com>",
     });
-    expect(sent).toEqual([]);
+    expect(sent).toStrictEqual([]);
     expect(ses.requests).toHaveLength(1);
-    const [request] = ses.requests;
-    expect(request!.url).toBe("https://email.eu-west-1.amazonaws.com/v2/email/outbound-emails");
-    expect(request!.authorization).toMatch(
-      /^AWS4-HMAC-SHA256 Credential=AKIATESTKEY\/\d{8}\/eu-west-1\/ses\/aws4_request, /,
+    expect(ses.requests[0]?.url).toBe(
+      "https://email.eu-west-1.amazonaws.com/v2/email/outbound-emails"
     );
-    expect(request!.body).toMatchObject({
+  });
+
+  it("signs the call for SES's region and sends the message as SES takes it", async () => {
+    const { EMAIL } = binding();
+    const ses = fakeSes();
+
+    await sendMail({ EMAIL, ...SES }, { ...MAIL, tags: { kind: "reply" } });
+
+    const [request] = ses.requests;
+    expect(request?.authorization).toMatch(
+      /^AWS4-HMAC-SHA256 Credential=AKIATESTKEY\/\d{8}\/eu-west-1\/ses\/aws4_request, /u
+    );
+    expect(request?.body).toMatchObject({
       FromEmailAddress: '"Acme Support" <support@example.com>',
-      Destination: { ToAddresses: ['"Jane Doe" <jane@example.org>', "bob@example.org"] },
+      Destination: {
+        ToAddresses: ['"Jane Doe" <jane@example.org>', "bob@example.org"],
+      },
       ReplyToAddresses: ["support+t1@example.com"],
       EmailTags: [{ Name: "kind", Value: "reply" }],
       Content: {
         Simple: {
+          // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- SES writes the charset as "UTF-8", and this pins what it is sent
           Subject: { Data: "Re: Your question", Charset: "UTF-8" },
           Body: { Text: { Data: "Hello" }, Html: { Data: "<p>Hello</p>" } },
           Headers: [
@@ -167,7 +225,11 @@ describe("sendMail", () => {
             { Name: "References", Value: "<q0@example.org> <q1@example.org>" },
           ],
           Attachments: [
-            { FileName: "log.txt", RawContent: btoa("log"), ContentDisposition: "ATTACHMENT" },
+            {
+              FileName: "log.txt",
+              RawContent: btoa("log"),
+              ContentDisposition: "ATTACHMENT",
+            },
             {
               FileName: "logo.png",
               RawContent: btoa("png"),
@@ -179,7 +241,7 @@ describe("sendMail", () => {
         },
       },
     });
-    expect(request!.body.ConfigurationSetName).toBeUndefined();
+    expect(request?.body.ConfigurationSetName).toBeUndefined();
   });
 
   it("reports nothing to the Email SDK's telemetry", async () => {
@@ -189,19 +251,31 @@ describe("sendMail", () => {
     vi.stubEnv("EMAIL_SDK_TELEMETRY", "");
     const ses = fakeSes();
     await sendMail(SES, MAIL);
-    expect(ses.requests.map((r) => new URL(r.url).host)).toEqual(["email.eu-west-1.amazonaws.com"]);
+    expect(ses.requests.map((r) => new URL(r.url).host)).toStrictEqual([
+      "email.eu-west-1.amazonaws.com",
+    ]);
     // Importing the package turned it off for the whole process.
-    expect(getTelemetryStatus()).toMatchObject({ enabled: false, reason: "code" });
+    expect(getTelemetryStatus()).toMatchObject({
+      enabled: false,
+      reason: "code",
+    });
   });
 
   it("hands a message SES refused to the binding and says why", async () => {
     const { sent, EMAIL } = binding();
-    fakeSes(() => refusal(403, "AccessDeniedException", "not authorized to perform ses:SendEmail"));
+    fakeSes(() =>
+      refusal(
+        403,
+        "AccessDeniedException",
+        "not authorized to perform ses:SendEmail"
+      )
+    );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const result = await sendMail({ EMAIL, ...SES }, MAIL);
     expect(result.transport).toBe("email-service");
     expect(sent).toHaveLength(1);
-    expect(JSON.parse(String(warn.mock.calls[0]![0]))).toEqual({
+    const [warned] = warn.mock.calls;
+    expect(JSON.parse(String(warned?.[0]))).toStrictEqual({
       event: "mail.ses_refused",
       status: 403,
       code: "AccessDeniedException",
@@ -209,8 +283,11 @@ describe("sendMail", () => {
   });
 
   it("keeps SES's refusal when there is no binding to fall back on", async () => {
-    fakeSes(() => refusal(400, "MessageRejected", "Email address is not verified."));
-    const err = await sendMail(SES, MAIL).catch((e: unknown) => e);
+    fakeSes(() =>
+      refusal(400, "MessageRejected", "Email address is not verified.")
+    );
+    // oxlint-disable-next-line anti-slop/no-unknown-parameters -- a rejection reason is unknown until this test says what it is
+    const err = await sendMail(SES, MAIL).catch((error: unknown) => error);
     expect(err).toBeInstanceOf(MailError);
     expect(err).toMatchObject({
       transport: "ses",
@@ -218,24 +295,30 @@ describe("sendMail", () => {
       code: "MessageRejected",
       message: "Email address is not verified.",
     });
-    expect((err as MailError).refusedMessage).toBe(true);
+    // SAFETY: the assertion above checked that `err` is a MailError.
+    expect((err as MailError).refusedMessage).toBeTruthy();
   });
 
   it("never sends again through the binding when SES may have taken the message", async () => {
     const { sent, EMAIL } = binding();
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("fetch failed"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new TypeError("fetch failed")
+    );
     await expect(sendMail({ EMAIL, ...SES }, MAIL)).rejects.toMatchObject({
       transport: "ses",
       status: undefined,
       message: "fetch failed",
     });
-    expect(sent).toEqual([]);
+    expect(sent).toStrictEqual([]);
   });
 
   it("answers the binding's failure with its code", async () => {
     const { EMAIL } = binding(
-      Object.assign(new Error("daily limit"), { code: "E_DAILY_LIMIT_EXCEEDED" }),
+      Object.assign(new Error("daily limit"), {
+        code: "E_DAILY_LIMIT_EXCEEDED",
+      })
     );
+
     await expect(sendMail({ EMAIL }, MAIL)).rejects.toMatchObject({
       name: "MailError",
       transport: "email-service",
@@ -246,10 +329,22 @@ describe("sendMail", () => {
 
   it("addresses a message to Bcc alone To its sender, and one without recipients nowhere", async () => {
     const { sent, EMAIL } = binding();
-    const bccOnly = { ...MAIL, to: [], bcc: ["boss@example.org"], attachments: [] };
+
+    const bccOnly = {
+      ...MAIL,
+      to: [],
+      bcc: ["boss@example.org"],
+      attachments: [],
+    };
+
     await sendMail({ EMAIL }, bccOnly);
-    expect(sent[0]).toMatchObject({ to: ["support@example.com"], bcc: ["boss@example.org"] });
-    await expect(sendMail({ EMAIL }, { ...bccOnly, bcc: [] })).rejects.toMatchObject({
+    expect(sent[0]).toMatchObject({
+      to: ["support@example.com"],
+      bcc: ["boss@example.org"],
+    });
+    await expect(
+      sendMail({ EMAIL }, { ...bccOnly, bcc: [] })
+    ).rejects.toMatchObject({
       name: "MailError",
       code: "validation_error",
     });
@@ -257,71 +352,104 @@ describe("sendMail", () => {
   });
 
   it("refuses to send without SES or the binding", async () => {
-    expect(canSendMail({})).toBe(false);
-    expect(canSendMail({ SES_REGION: "eu-west-1", SES_ACCESS_KEY_ID: "k" })).toBe(false);
-    expect(canSendMail(SES)).toBe(true);
+    expect(canSendMail({})).toBeFalsy();
+    expect(
+      canSendMail({ SES_REGION: "eu-west-1", SES_ACCESS_KEY_ID: "k" })
+    ).toBeFalsy();
+    expect(canSendMail(SES)).toBeTruthy();
     await expect(sendMail({}, MAIL)).rejects.toBeInstanceOf(MailError);
   });
 });
 
-describe("sendWithSes", () => {
+describe(sendWithSes, () => {
   it("names the configuration set and never falls back", async () => {
     const ses = fakeSes(() =>
-      refusal(429, "TooManyRequestsException", "Maximum sending rate exceeded."),
+      refusal(429, "TooManyRequestsException", "Maximum sending rate exceeded.")
     );
+
     await expect(
-      sendWithSes(SES_CONFIG, MAIL, { configurationSet: "newsletter" }),
+      sendWithSes(SES_CONFIG, MAIL, { configurationSet: "newsletter" })
     ).rejects.toMatchObject({
       status: 429,
       code: "TooManyRequestsException",
       refusedMessage: false,
     });
-    expect(ses.requests[0]!.body.ConfigurationSetName).toBe("newsletter");
+    expect(ses.requests[0]?.body.ConfigurationSetName).toBe("newsletter");
   });
 
   it("sends a long thread's References within the 996 characters SES takes for a header", async () => {
     const ses = fakeSes();
+
     const ids = Array.from(
       { length: 16 },
-      (_, i) => `<m${String(i).padStart(2, "0")}-${"x".repeat(43)}@example.org>`,
+      (_, i) => `<m${String(i).padStart(2, "0")}-${"x".repeat(43)}@example.org>`
     );
+
     // Within the 995 characters SES takes for a value, beyond the 996 it takes for the name and value together.
     expect(ids.join(" ")).toHaveLength(991);
-    await sendWithSes(SES_CONFIG, { ...MAIL, headers: { References: ids.join(" ") } });
-    const [header] = ses.requests[0]!.body.Content.Simple.Headers!;
-    expect(header!.Name.length + header!.Value.length).toBeLessThanOrEqual(996);
-    expect(header!.Value).toBe([ids[0], ...ids.slice(2)].join(" "));
+    await sendWithSes(SES_CONFIG, {
+      ...MAIL,
+      headers: { References: ids.join(" ") },
+    });
+    const [header] = ses.requests[0]?.body.Content.Simple.Headers ?? [];
+    expect(
+      (header?.Name.length ?? 0) + (header?.Value.length ?? 0)
+    ).toBeLessThanOrEqual(996);
+    expect(header?.Value).toBe([ids[0], ...ids.slice(2)].join(" "));
   });
 });
 
 describe("addresses and headers for SES", () => {
   it("quotes a name, or MIME-encodes one that is not ASCII", () => {
     expect(formatSesAddress("jane@example.org")).toBe("jane@example.org");
-    expect(formatSesAddress("Jane <jane@example.org>")).toBe('"Jane" <jane@example.org>');
-    expect(formatSesAddress({ email: "a@b.c", name: 'Say "hi"' })).toBe('"Say \\"hi\\"" <a@b.c>');
-    expect(formatSesAddress({ email: "a@b.c", name: "Zoë" })).toBe("=?UTF-8?B?Wm/Dqw==?= <a@b.c>");
+    expect(formatSesAddress("Jane <jane@example.org>")).toBe(
+      '"Jane" <jane@example.org>'
+    );
+    expect(formatSesAddress({ email: "a@b.c", name: 'Say "hi"' })).toBe(
+      '"Say \\"hi\\"" <a@b.c>'
+    );
+    expect(formatSesAddress({ email: "a@b.c", name: "Zoë" })).toBe(
+      "=?UTF-8?B?Wm/Dqw==?= <a@b.c>"
+    );
     expect(formatSesAddress({ email: "a@b.c", name: null })).toBe("a@b.c");
   });
 
   it("keeps a long References within what SES takes for it: the first and the latest", () => {
     const ids = Array.from(
       { length: 40 },
-      (_, i) => `<message-${String(i).padStart(2, "0")}@mail.example.com>`,
+      (_, i) => `<message-${String(i).padStart(2, "0")}@mail.example.com>`
     );
+
     const fitted = fitReferences(ids.join(" "));
     expect(fitted.length).toBeLessThanOrEqual(986);
     const kept = fitted.split(" ");
     expect(kept[0]).toBe(ids[0]);
     expect(kept.at(-1)).toBe(ids.at(-1));
-    expect(kept.slice(1)).toEqual(ids.slice(ids.length - (kept.length - 1)));
+    expect(kept.slice(1)).toStrictEqual(
+      ids.slice(ids.length - (kept.length - 1))
+    );
+  });
+
+  it("leaves a References that already fits as it is", () => {
+    const ids = Array.from(
+      { length: 40 },
+      (_, i) => `<message-${String(i).padStart(2, "0")}@mail.example.com>`
+    );
+
     expect(fitReferences("<a@b> <c@d>")).toBe("<a@b> <c@d>");
     expect(fitReferences(ids.join(" "), 2048)).toBe(ids.join(" "));
   });
 
+  it("empties a References too long to fit that names no message", () => {
+    expect(fitReferences(" ".repeat(1000))).toBe("");
+  });
+
   it("names SES's Message-ID at the region's sending domain", () => {
     expect(sesMessageId("eu-west-1", "0107-x-000000")).toBe(
-      "<0107-x-000000@eu-west-1.amazonses.com>",
+      "<0107-x-000000@eu-west-1.amazonses.com>"
     );
-    expect(sesMessageId("us-east-1", "0100-x-000000")).toBe("<0100-x-000000@email.amazonses.com>");
+    expect(sesMessageId("us-east-1", "0100-x-000000")).toBe(
+      "<0100-x-000000@email.amazonses.com>"
+    );
   });
 });

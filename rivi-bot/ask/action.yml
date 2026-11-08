@@ -118,17 +118,7 @@ runs:
         allowed_non_write_users: "*"
         settings: '{"disableAllHooks":true}'
         claude_args: >-
-          --model ${{ inputs.model }}
-          --effort medium
-          --max-turns 25
-          --max-budget-usd 2
-          --setting-sources user
-          --strict-mcp-config
-          --permission-mode default
-          --add-dir ${{ steps.thread.outputs.dir }}
-          --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)"
-          --allowedTools "Read,Glob,Grep"
-          --json-schema '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}'
+          --model ${{ inputs.model }} --effort medium --max-turns 25 --max-budget-usd 2 --setting-sources user --strict-mcp-config --permission-mode default --add-dir ${{ steps.thread.outputs.dir }} --disallowedTools "Bash,Edit,Write,MultiEdit,NotebookEdit,Agent,Task,WebFetch,WebSearch,Read(//proc/**),Read(//sys/**)" --allowedTools "Read,Glob,Grep" --json-schema '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}'
         prompt: |
           A maintainer of ${{ github.repository }} asks about ${{ steps.thread.outputs.kind }} #${{ inputs.number }}${{ inputs.thread != '' && ', in a review thread (review-thread.json); "this" and "here" point at its lines' || '' }}:
 

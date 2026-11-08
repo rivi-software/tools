@@ -1,4 +1,5 @@
 import path from "node:path";
+
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -6,7 +7,10 @@ export default defineConfig({
   // stand-in there.
   resolve: {
     alias: {
-      "cloudflare:email": path.resolve(import.meta.dirname, "tests/cloudflare-email.ts"),
+      "cloudflare:email": path.resolve(
+        import.meta.dirname,
+        "tests/cloudflare-email.ts"
+      ),
     },
   },
 });

@@ -5,8 +5,15 @@
  * the page, so the name is in no chunk. Null for an id that is not a plain file name, which gets
  * no copy.
  */
-export function ownBuildFilePath(assetsDir: string, id: string): string | null {
-  if (!/^[\w.-]{1,100}$/.test(id)) return null;
-  const dir = assetsDir.replace(/^\/+|\/+$/g, "");
+export const ownBuildFilePath = (
+  assetsDir: string,
+  id: string
+): string | null => {
+  if (!/^[\w.-]{1,100}$/u.test(id)) {
+    return null;
+  }
+
+  const dir = assetsDir.replaceAll(/^\/+|\/+$/gu, "");
+
   return `${dir ? `${dir}/` : ""}deploy-watch-${id}.json`;
-}
+};

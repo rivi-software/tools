@@ -17,15 +17,17 @@ export const PREVIOUS_ASSETS_BINDING = "PREVIOUS_ASSETS";
 export const ASSET_PATH_PREFIX = "/assets/";
 
 /** What the deploy stores beside each file's bytes. */
-export type PreviousAssetMetadata = { contentType: string };
+export interface PreviousAssetMetadata {
+  contentType: string;
+}
 
 /** The part of a KV namespace binding the Worker reads with. */
-export type PreviousAssetStore = {
-  getWithMetadata(
+export interface PreviousAssetStore {
+  getWithMetadata: (
     key: string,
-    type: "arrayBuffer",
-  ): Promise<{ value: ArrayBuffer | null; metadata: unknown }>;
-};
+    type: "arrayBuffer"
+  ) => Promise<{ value: ArrayBuffer | null; metadata: unknown }>;
+}
 
 /** A file's key in the store: its URL path without the leading slash (`assets/index-abc.js`). */
 export const assetKey = (pathname: string) => pathname.slice(1);
@@ -36,16 +38,16 @@ const MAX_KEY_BYTES = 512;
 const notFound = () =>
   new Response("Not found", {
     status: 404,
-    headers: { "cache-control": "no-store", "content-type": "text/plain; charset=utf-8" },
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+    },
   });
 
 /** Whether the request reads a build file, which only the store may still hold. */
-export function isAssetRequest(request: Request, url = new URL(request.url)) {
-  return (
-    (request.method === "GET" || request.method === "HEAD") &&
-    url.pathname.startsWith(ASSET_PATH_PREFIX)
-  );
-}
+export const isAssetRequest = (request: Request, url = new URL(request.url)) =>
+  (request.method === "GET" || request.method === "HEAD") &&
+  url.pathname.startsWith(ASSET_PATH_PREFIX);
 
 /**
  * The answer to a request under `/assets/` that reached the Worker: the file of an earlier build
@@ -53,28 +55,37 @@ export function isAssetRequest(request: Request, url = new URL(request.url)) {
  * file never changes and is cached for a year. Without a store (local development, Previews)
  * every such request is a 404.
  */
-export async function servePreviousAsset(
+export const servePreviousAsset = async (
   request: Request,
-  store: PreviousAssetStore | undefined,
-): Promise<Response> {
+  store: PreviousAssetStore | undefined
+): Promise<Response> => {
   // The store keys a file by its name as the build wrote it, a request names it percent-encoded
   // (`Über page-1.js` as `%C3%9Cber%20page-1.js`), and a malformed escape names no file at all.
   let key: string;
+
   try {
     key = assetKey(decodeURIComponent(new URL(request.url).pathname));
   } catch {
     return notFound();
   }
+
   const found =
     store && new TextEncoder().encode(key).length <= MAX_KEY_BYTES
       ? await store.getWithMetadata(key, "arrayBuffer")
       : null;
-  if (!found?.value) return notFound();
+
+  if (!found?.value) {
+    return notFound();
+  }
+
+  // SAFETY: the deploy writes a PreviousAssetMetadata beside every file; a store written by an
+  // older deploy may lack fields, which `Partial` and the fallback below allow for.
   const metadata = found.metadata as Partial<PreviousAssetMetadata> | null;
+
   return new Response(request.method === "HEAD" ? null : found.value, {
     headers: {
       "content-type": metadata?.contentType ?? "application/octet-stream",
       "cache-control": "public, max-age=31536000, immutable",
     },
   });
-}
+};

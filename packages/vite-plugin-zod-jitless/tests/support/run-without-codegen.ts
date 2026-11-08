@@ -11,45 +11,101 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 
 const attempts: string[] = [];
-function counted(name: string, target: Function): Function {
-  return new Proxy(target, {
-    apply(target, self, args) {
+
+/** Anything that compiles a string: `eval`, and each kind of function's constructor. */
+type Compiler = (...args: never[]) => void;
+
+const counted = <T extends Compiler>(name: string, target: T): T =>
+  new Proxy(target, {
+    apply(wrapped, self, args) {
       attempts.push(name);
-      return Reflect.apply(target, self, args);
+
+      // oxlint-disable-next-line anti-slop/no-reflect-apply -- a proxy's apply trap forwards the receiver and the argument list it was handed
+      return Reflect.apply(wrapped, self, args);
     },
-    construct(target, args, newTarget) {
+    construct(wrapped, args, newTarget) {
       attempts.push(name);
-      return Reflect.construct(target, args, newTarget);
+
+      return Reflect.construct(wrapped, args, newTarget);
     },
   });
-}
 
 // Each way to compile a string: eval, and the constructor of each kind of function, both by its
 // global name and through any function's `constructor`.
-// oxlint-disable-next-line no-eval -- wraps eval to count the calls; never calls it
-Object.assign(globalThis, { eval: counted("eval", eval), Function: counted("Function", Function) });
-for (const kind of [function () {}, async function () {}, function* () {}, async function* () {}]) {
+Object.assign(globalThis, {
+  // oxlint-disable-next-line eslint/no-eval -- wraps eval to count the calls; never calls it
+  eval: counted("eval", eval),
+  Function: counted("Function", Function),
+});
+
+/** A sample of each kind of function: its prototype carries the constructor that compiles. */
+const KINDS = [
+  function plain() {
+    // Never called.
+  },
+  // oxlint-disable-next-line eslint/require-await -- a sample, only ever read for its prototype
+  async function asynchronous() {
+    // Never called.
+  },
+  function* generator() {
+    // Never called.
+  },
+  // oxlint-disable-next-line eslint/require-await -- a sample, only ever read for its prototype
+  async function* asyncGenerator() {
+    // Never called.
+  },
+];
+
+for (const kind of KINDS) {
   const prototype = Object.getPrototypeOf(kind);
-  const constructor = counted(prototype.constructor.name, prototype.constructor);
+
+  const constructor = counted(
+    prototype.constructor.name,
+    prototype.constructor
+  );
+
   Object.defineProperty(prototype, "constructor", { value: constructor });
 }
 
 const [target, modulesFile] = process.argv.slice(2);
+
 if (modulesFile) {
-  const modules: Record<string, string> = JSON.parse(readFileSync(modulesFile, "utf8"));
+  const modules: Record<string, string> = JSON.parse(
+    readFileSync(modulesFile, "utf-8")
+  );
+
   registerHooks({
     resolve(specifier, context, nextResolve) {
       const parent = context.parentURL;
-      const url = parent && parent in modules ? new URL(specifier, parent).href : specifier;
-      if (url in modules) return { url, shortCircuit: true };
+
+      const url =
+        parent && parent in modules
+          ? new URL(specifier, parent).href
+          : specifier;
+
+      if (url in modules) {
+        return { url, shortCircuit: true };
+      }
+
       return nextResolve(specifier, context);
     },
     load(url, context, nextLoad) {
-      if (url in modules) return { format: "module", source: modules[url], shortCircuit: true };
+      if (url in modules) {
+        return { format: "module", source: modules[url], shortCircuit: true };
+      }
+
       return nextLoad(url, context);
     },
   });
 }
 
 await import(modulesFile ? target : pathToFileURL(target).href);
-console.log(JSON.stringify({ attempts, result: (globalThis as { result?: unknown }).result }));
+
+// SAFETY: the module just imported writes its answer to `globalThis.result`, which the global type
+// does not name; reading it off the wider shape yields that value or undefined.
+console.log(
+  JSON.stringify({
+    attempts,
+    result: (globalThis as { result?: unknown }).result,
+  })
+);

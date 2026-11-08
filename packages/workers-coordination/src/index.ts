@@ -12,13 +12,16 @@ export {
   type RateLimitResult,
   type RateLimiterStub,
 } from "./rate-limit.js";
+
+export { LeaseLostError } from "./lease-lost-error.js";
+
 export {
   LeaseLock,
-  LeaseLostError,
   acquireLease,
   type Lease,
   type LeaseGrant,
   type LeaseLockStub,
   type LeaseOptions,
 } from "./lease.js";
+
 export type { DurableObjectNamespaceLike } from "./objects.js";

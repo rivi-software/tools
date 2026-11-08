@@ -14,6 +14,7 @@
  */
 
 import { appendFileSync } from "node:fs";
+
 import {
   MISSING_STATUS_QUERY,
   isIssueOrPullRequest,
@@ -24,7 +25,7 @@ import {
 } from "./project-items.ts";
 import type { Item, StartingStatus } from "./project-items.ts";
 
-const env = process.env;
+const { env } = process;
 
 /** The fields read for an issue or a pull request, in a search or on a card. */
 const ITEM_FIELDS = `
@@ -46,7 +47,29 @@ interface PageInfo {
   endCursor: string | null;
 }
 
-async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+/** One page of the items a search finds. */
+interface SearchPage {
+  search: { nodes: Item[]; pageInfo: PageInfo };
+}
+
+/** A card on the project, with the issue or pull request it holds. */
+interface Card {
+  id: string;
+  content: { __typename: string } | null;
+}
+
+/** One page of the project's cards. */
+interface CardPage {
+  node: { items: { nodes: Card[]; pageInfo: PageInfo } };
+}
+
+/** A value a GraphQL variable takes: this script passes scalars only. */
+type Variable = string | number | boolean | null;
+
+const graphql = async <T>(
+  query: string,
+  variables: Record<string, Variable>
+): Promise<T> => {
   const response = await fetch("https://api.github.com/graphql", {
     method: "POST",
     headers: {
@@ -56,16 +79,27 @@ async function graphql<T>(query: string, variables: Record<string, unknown>): Pr
     body: JSON.stringify({ query, variables }),
     signal: AbortSignal.timeout(30_000),
   });
+
   const text = await response.text();
+
   if (!response.ok) {
-    throw new Error(`GitHub GraphQL returned HTTP ${response.status}: ${text.slice(0, 500)}`);
+    throw new Error(
+      `GitHub GraphQL returned HTTP ${response.status}: ${text.slice(0, 500)}`
+    );
   }
+
+  // SAFETY: GitHub's GraphQL API answers JSON with data, errors, or both.
   const body = JSON.parse(text) as { data?: T; errors?: { message: string }[] };
+
   if (body.errors?.length) {
-    throw new Error(`GitHub GraphQL: ${body.errors.map((error) => error.message).join("; ")}`);
+    throw new Error(
+      `GitHub GraphQL: ${body.errors.map((error) => error.message).join("; ")}`
+    );
   }
+
+  // SAFETY: a response without errors carries the data the query asked for.
   return body.data as T;
-}
+};
 
 interface Project {
   id: string;
@@ -74,7 +108,7 @@ interface Project {
   optionIds: Record<StartingStatus, string>;
 }
 
-async function project(owner: string, number: number): Promise<Project> {
+const project = async (owner: string, number: number): Promise<Project> => {
   const data = await graphql<{
     organization: {
       projectV2: {
@@ -103,55 +137,65 @@ async function project(owner: string, number: number): Promise<Project> {
         }
       }
     `,
-    { owner, number },
+    { owner, number }
   );
+
   const found = data.organization.projectV2;
-  if (!found) throw new Error(`${owner} has no project ${number}, or the token cannot see it.`);
-  if (!found.field) throw new Error(`${found.title} has no single-select Status field.`);
+
+  if (!found) {
+    throw new Error(
+      `${owner} has no project ${number}, or the token cannot see it.`
+    );
+  }
+
+  if (!found.field) {
+    throw new Error(`${found.title} has no single-select Status field.`);
+  }
+
   return {
     id: found.id,
     title: found.title,
     fieldId: found.field.id,
     optionIds: statusOptionIds(found.field.options),
   };
-}
+};
 
 /** Every item the search finds, a page of a hundred at a time. Search stops at a thousand. */
-async function search(query: string): Promise<Item[]> {
+const search = async (query: string): Promise<Item[]> => {
   const items: Item[] = [];
+
   for (let after: string | null = null; ;) {
-    const data: { search: { nodes: Item[]; pageInfo: PageInfo } } = await graphql(
+    // oxlint-disable-next-line eslint/no-await-in-loop -- each page needs the cursor of the page before
+    const data: SearchPage = await graphql(
       `query ($query: String!, $after: String) {
         search(type: ISSUE, query: $query, first: 100, after: $after) {
           nodes { ${ITEM_FIELDS} }
           pageInfo { hasNextPage endCursor }
         }
       }`,
-      { query, after },
+      { query, after }
     );
+
     items.push(...data.search.nodes);
-    if (!data.search.pageInfo.hasNextPage) return items;
+
+    if (!data.search.pageInfo.hasNextPage) {
+      return items;
+    }
+
     after = data.search.pageInfo.endCursor;
   }
-}
+};
 
 /**
  * The project's open cards without a Status. Read in full before any changes, since setting a
  * Status takes a card out of the filter and would shift the pages.
  */
-async function cardsWithoutStatus(
-  target: Project,
-): Promise<{ id: string; content: { __typename: string } | null }[]> {
-  const cards: { id: string; content: { __typename: string } | null }[] = [];
+const cardsWithoutStatus = async (target: Project): Promise<Card[]> => {
+  const cards: Card[] = [];
+
   for (let after: string | null = null; ;) {
-    const data: {
-      node: {
-        items: {
-          nodes: { id: string; content: { __typename: string } | null }[];
-          pageInfo: PageInfo;
-        };
-      };
-    } = await graphql(
+    // oxlint-disable-next-line eslint/no-await-in-loop -- each page needs the cursor of the page before
+    const data: CardPage = await graphql(
       `query ($project: ID!, $query: String!, $after: String) {
         node(id: $project) {
           ... on ProjectV2 {
@@ -162,19 +206,27 @@ async function cardsWithoutStatus(
           }
         }
       }`,
-      { project: target.id, query: MISSING_STATUS_QUERY, after },
+      { project: target.id, query: MISSING_STATUS_QUERY, after }
     );
+
     cards.push(...data.node.items.nodes);
-    if (!data.node.items.pageInfo.hasNextPage) return cards;
+
+    if (!data.node.items.pageInfo.hasNextPage) {
+      return cards;
+    }
+
     after = data.node.items.pageInfo.endCursor;
   }
-}
+};
 
 /**
  * Adds the item and returns its card, with the Status the card has. Adding one that is on the
  * project already, which a search that lags can still return, gives back its card as it is.
  */
-async function addItem(target: Project, item: Item): Promise<{ id: string; status?: string }> {
+const addItem = async (
+  target: Project,
+  item: Item
+): Promise<{ id: string; status?: string }> => {
   const data = await graphql<{
     addProjectV2ItemById: {
       item: { id: string; fieldValueByName: { name?: string } | null };
@@ -182,7 +234,9 @@ async function addItem(target: Project, item: Item): Promise<{ id: string; statu
   }>(
     `
       mutation ($project: ID!, $content: ID!) {
-        addProjectV2ItemById(input: { projectId: $project, contentId: $content }) {
+        addProjectV2ItemById(
+          input: { projectId: $project, contentId: $content }
+        ) {
           item {
             id
             fieldValueByName(name: "Status") {
@@ -194,13 +248,19 @@ async function addItem(target: Project, item: Item): Promise<{ id: string; statu
         }
       }
     `,
-    { project: target.id, content: item.id },
+    { project: target.id, content: item.id }
   );
-  const card = data.addProjectV2ItemById.item;
-  return { id: card.id, status: card.fieldValueByName?.name };
-}
 
-async function setStatus(target: Project, card: string, status: StartingStatus): Promise<void> {
+  const card = data.addProjectV2ItemById.item;
+
+  return { id: card.id, status: card.fieldValueByName?.name };
+};
+
+const setStatus = async (
+  target: Project,
+  card: string,
+  status: StartingStatus
+): Promise<void> => {
   await graphql(
     `
       mutation ($project: ID!, $item: ID!, $field: ID!, $option: String!) {
@@ -218,17 +278,21 @@ async function setStatus(target: Project, card: string, status: StartingStatus):
         }
       }
     `,
-    { project: target.id, item: card, field: target.fieldId, option: target.optionIds[status] },
+    {
+      project: target.id,
+      item: card,
+      field: target.fieldId,
+      option: target.optionIds[status],
+    }
   );
-}
+};
 
-function link(item: Item): string {
-  return `[${item.repository.nameWithOwner}#${item.number}](${item.url})`;
-}
+const link = (item: Item): string =>
+  `[${item.repository.nameWithOwner}#${item.number}](${item.url})`;
 
-function message(error: unknown): string {
-  return (error as Error).message;
-}
+// SAFETY: fetch, JSON.parse and this script throw Errors.
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- a catch binding is whatever was thrown
+const message = (error: unknown): string => (error as Error).message;
 
 interface Report {
   lines: string[];
@@ -238,63 +302,97 @@ interface Report {
   withoutStatus: Set<string>;
 }
 
-async function addNewItems(target: Project, owner: string, number: number, report: Report) {
+const addNewItems = async (
+  target: Project,
+  owner: string,
+  number: number,
+  report: Report
+) => {
   for (const item of await search(searchQuery(owner, number))) {
     const reason = leaveOffReason(item);
+
     if (reason) {
       report.lines.push(`Left off ${link(item)}: ${reason}.`);
       continue;
     }
+
     let card: { id: string; status?: string };
+
     try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one item at a time, so one failure leaves the others alone
       card = await addItem(target, item);
     } catch (error) {
       report.notAdded += 1;
       report.lines.push(`Could not add ${link(item)}: ${message(error)}`);
       continue;
     }
+
     if (card.status) {
-      report.lines.push(`${link(item)} was on the project already, in ${card.status}.`);
+      report.lines.push(
+        `${link(item)} was on the project already, in ${card.status}.`
+      );
       continue;
     }
+
     const status = startingStatus(item);
+
     try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one item at a time, so one failure leaves the others alone
       await setStatus(target, card.id, status);
       report.lines.push(`Added ${link(item)} in ${status}: ${item.title}`);
     } catch (error) {
       report.withoutStatus.add(card.id);
-      report.lines.push(`Added ${link(item)}, but could not set its Status: ${message(error)}`);
+      report.lines.push(
+        `Added ${link(item)}, but could not set its Status: ${message(error)}`
+      );
     }
   }
-}
+};
 
-async function fillMissingStatuses(target: Project, report: Report) {
+const fillMissingStatuses = async (target: Project, report: Report) => {
   for (const card of await cardsWithoutStatus(target)) {
     // A draft issue, or what a bot opened that someone added by hand, keeps the Status it has.
-    if (!isIssueOrPullRequest(card.content) || leaveOffReason(card.content)) continue;
+    if (!isIssueOrPullRequest(card.content) || leaveOffReason(card.content)) {
+      continue;
+    }
+
     const item = card.content;
     const status = startingStatus(item);
+
     try {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one card at a time, so one failure leaves the others alone
       await setStatus(target, card.id, status);
       report.withoutStatus.delete(card.id);
-      report.lines.push(`Set the missing Status of ${link(item)} to ${status}.`);
+      report.lines.push(
+        `Set the missing Status of ${link(item)} to ${status}.`
+      );
     } catch (error) {
       report.withoutStatus.add(card.id);
-      report.lines.push(`Could not set the Status of ${link(item)}: ${message(error)}`);
+      report.lines.push(
+        `Could not set the Status of ${link(item)}: ${message(error)}`
+      );
     }
   }
-}
+};
 
-for (const name of ["GITHUB_TOKEN", "PROJECT_OWNER", "PROJECT_NUMBER"]) {
-  if (!env[name]) {
+/** The value of an environment variable the run needs; it names the missing one and stops. */
+const required = (name: string): string => {
+  const value = env[name];
+
+  if (!value) {
     console.log(`::error title=Add to project::Set ${name}.`);
     process.exit(1);
   }
-}
+
+  return value;
+};
+
+required("GITHUB_TOKEN");
+
+const owner = required("PROJECT_OWNER");
+const number = Number(required("PROJECT_NUMBER"));
 
 try {
-  const owner = env.PROJECT_OWNER!;
-  const number = Number(env.PROJECT_NUMBER);
   const target = await project(owner, number);
   const report: Report = { lines: [], notAdded: 0, withoutStatus: new Set() };
 
@@ -302,19 +400,28 @@ try {
   await fillMissingStatuses(target, report);
 
   const summary = `## ${target.title}\n\n${
-    report.lines.length ? report.lines.map((line) => `- ${line}`).join("\n") : "Nothing new."
+    report.lines.length
+      ? report.lines.map((line) => `- ${line}`).join("\n")
+      : "Nothing new."
   }\n`;
-  if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary);
+
+  if (env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(env.GITHUB_STEP_SUMMARY, summary);
+  }
+
   console.log(summary);
 
   const failed = report.notAdded + report.withoutStatus.size;
+
   if (failed) {
     console.log(
-      `::error title=Add to project::${failed} item(s) could not be added or have no Status yet. The next run tries again.`,
+      `::error title=Add to project::${failed} item(s) could not be added or have no Status yet. The next run tries again.`
     );
     process.exit(1);
   }
 } catch (error) {
-  console.log(`::error title=Add to project::${message(error).replaceAll("%", "%25")}`);
+  console.log(
+    `::error title=Add to project::${message(error).replaceAll("%", "%25")}`
+  );
   process.exit(1);
 }

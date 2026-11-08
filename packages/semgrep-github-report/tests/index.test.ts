@@ -1,93 +1,128 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, it } from "vitest";
+
 import {
   COMMENT_MARKER,
   formatFindingsComment,
   formatFindingsSummary,
   parseFindings,
-  type SemgrepFinding,
   semgrepFingerprint,
 } from "../src/index.js";
+import type { SemgrepFinding } from "../src/index.js";
 
-describe("semgrepFingerprint", () => {
-  test("uses Semgrep fingerprint when present, under extra as semgrep scan --json writes it", () => {
-    const finding = {
+describe(semgrepFingerprint, () => {
+  it("uses Semgrep fingerprint when present, under extra as semgrep scan --json writes it", () => {
+    const fromCloud = {
       check_id: "example.rule",
       path: "src/a.ts",
       start: { line: 1 },
       end: { line: 1 },
       extra: { message: "x", severity: "LOW", fingerprint: "cloud-fp-123" },
     };
-    expect(semgrepFingerprint(finding)).toBe("cloud-fp-123");
+
+    expect(semgrepFingerprint(fromCloud)).toBe("cloud-fp-123");
   });
 
-  test("hashes rule, path, and lines when cloud fingerprint requires login", () => {
-    const finding = {
+  it("hashes rule, path, and lines when cloud fingerprint requires login", () => {
+    const needsLogin = {
       check_id: "example.rule",
       path: "src/a.ts",
       start: { line: 10 },
       end: { line: 12 },
       extra: { message: "x", severity: "LOW", fingerprint: "requires login" },
     };
-    const a = semgrepFingerprint(finding);
-    const b = semgrepFingerprint({ ...finding, start: { line: 11 } });
+
+    const a = semgrepFingerprint(needsLogin);
+    const b = semgrepFingerprint({ ...needsLogin, start: { line: 11 } });
     expect(a).toHaveLength(40);
     expect(a).not.toBe(b);
-    expect(semgrepFingerprint({ ...finding, extra: { message: "x", severity: "LOW" } })).toBe(a);
+    expect(
+      semgrepFingerprint({
+        ...needsLogin,
+        extra: { message: "x", severity: "LOW" },
+      })
+    ).toBe(a);
   });
 });
 
-function finding(path: string, line: number): SemgrepFinding {
-  return {
-    check_id: "example.rule",
-    path,
-    start: { line },
-    end: { line },
-    extra: {
-      message: "Something risky",
-      severity: "ERROR",
-      metadata: { shortlink: "https://sg.run/x" },
-      fingerprint: "requires login",
-    },
-  };
-}
+const finding = (file: string, line: number): SemgrepFinding => ({
+  check_id: "example.rule",
+  path: file,
+  start: { line },
+  end: { line },
+  extra: {
+    message: "Something risky",
+    severity: "ERROR",
+    metadata: { shortlink: "https://sg.run/x" },
+    fingerprint: "requires login",
+  },
+});
 
 const revision = { repository: "acme/app", sha: "abc123" };
 
-describe("formatFindingsSummary", () => {
-  test("lists each finding with its rule and a link to the scanned line", () => {
-    const summary = formatFindingsSummary([finding("src/routes/chat.tsx", 170)], revision);
+describe(formatFindingsSummary, () => {
+  it("lists each finding with its rule and a link to the scanned line", () => {
+    const summary = formatFindingsSummary(
+      [finding("src/routes/chat.tsx", 170)],
+      revision
+    );
+
     expect(summary).toBe(
       "## Semgrep findings on `abc123` (1)\n\n" +
         "| Severity | Rule | Location |\n| --- | --- | --- |\n" +
-        "| ERROR | [`example.rule`](https://sg.run/x) | [`src/routes/chat.tsx:170`](https://github.com/acme/app/blob/abc123/src/routes/chat.tsx#L170) |\n",
+        "| ERROR | [`example.rule`](https://sg.run/x) | [`src/routes/chat.tsx:170`](https://github.com/acme/app/blob/abc123/src/routes/chat.tsx#L170) |\n"
     );
   });
 
-  test("says so when the scan found nothing", () => {
+  it("says so when the scan found nothing", () => {
     expect(formatFindingsSummary([], revision)).toBe(
-      "## Semgrep findings on `abc123` (0)\n\nNo findings.\n",
+      "## Semgrep findings on `abc123` (0)\n\nNo findings.\n"
     );
   });
 
-  test("links to the GitHub server it is given, with each part of the path encoded", () => {
-    const summary = formatFindingsSummary([finding("docs/Q&A #2/run me.sh", 3)], {
-      ...revision,
-      serverUrl: "https://github.example.com",
-    });
+  it("links to the GitHub server it is given, with each part of the path encoded", () => {
+    const summary = formatFindingsSummary(
+      [finding("docs/Q&A #2/run me.sh", 3)],
+      {
+        ...revision,
+        serverUrl: "https://github.example.com",
+      }
+    );
+
     expect(summary).toContain(
-      "[`docs/Q&A #2/run me.sh:3`](https://github.example.com/acme/app/blob/abc123/docs/Q%26A%20%232/run%20me.sh#L3)",
+      "[`docs/Q&A #2/run me.sh:3`](https://github.example.com/acme/app/blob/abc123/docs/Q%26A%20%232/run%20me.sh#L3)"
     );
   });
 
-  test("leaves the rule unlinked when Semgrep gives no shortlink", () => {
+  it("leaves the rule unlinked when Semgrep gives no shortlink", () => {
     const { metadata: _, ...extra } = finding("src/a.ts", 1).extra;
-    const summary = formatFindingsSummary([{ ...finding("src/a.ts", 1), extra }], revision);
+
+    const summary = formatFindingsSummary(
+      [{ ...finding("src/a.ts", 1), extra }],
+      revision
+    );
+
     expect(summary).toContain("| ERROR | `example.rule` | ");
   });
 });
 
-describe("formatFindingsComment", () => {
-  test("opens with the marker, then lists the findings and each one's message and fingerprint", () => {
+/** A comment for more findings than even a table of them fits in. */
+const tooLongTable = () =>
+  formatFindingsComment(
+    Array.from({ length: 1000 }, (_, index) =>
+      finding(
+        `src/a/rather/deeply/nested/directory/file-${index}.ts`,
+        index + 1
+      )
+    ),
+    revision
+  );
+
+/** How many finding rows a comment lists. */
+const rowsListed = (comment: string) =>
+  comment.match(/^\| ERROR \|/gmu)?.length ?? 0;
+
+describe(formatFindingsComment, () => {
+  it("opens with the marker, then lists the findings and each one's message and fingerprint", () => {
     const found = finding("src/routes/chat.tsx", 170);
     expect(formatFindingsComment([found], revision)).toBe(
       `${COMMENT_MARKER}\n## Semgrep findings\n\n` +
@@ -97,62 +132,77 @@ describe("formatFindingsComment", () => {
         "### `example.rule` — `src/routes/chat.tsx:170`\n\n" +
         "Something risky\n\n" +
         "Rule link: https://sg.run/x\n\n" +
-        `Fingerprint: \`${semgrepFingerprint(found)}\`\n`,
+        `Fingerprint: \`${semgrepFingerprint(found)}\`\n`
     );
   });
 
-  test("says there are no new findings under the same marker, so it can replace an earlier list", () => {
+  it("says there are no new findings under the same marker, so it can replace an earlier list", () => {
     expect(formatFindingsComment([], revision)).toBe(
-      `${COMMENT_MARKER}\n## Semgrep findings\n\nNo new findings on this revision.\n`,
+      `${COMMENT_MARKER}\n## Semgrep findings\n\nNo new findings on this revision.\n`
     );
   });
 
-  test("leaves the messages out of a comment that would pass GitHub's 65,536 characters", () => {
+  it("leaves the messages out of a comment that would pass GitHub's 65,536 characters", () => {
     const findings = Array.from({ length: 100 }, (_, index) => ({
       ...finding(`src/file-${index}.ts`, index + 1),
-      extra: { message: "Explained at length. ".repeat(50), severity: "WARNING" },
+      extra: {
+        message: "Explained at length. ".repeat(50),
+        severity: "WARNING",
+      },
     }));
+
     const comment = formatFindingsComment(findings, revision);
     expect(comment.length).toBeLessThanOrEqual(65_536);
-    expect(comment.startsWith(`${COMMENT_MARKER}\n`)).toBe(true);
-    expect(comment.match(/^\| WARNING \|/gm)).toHaveLength(100);
+    expect(comment.startsWith(`${COMMENT_MARKER}\n`)).toBeTruthy();
+    expect(comment.match(/^\| WARNING \|/gmu)).toHaveLength(100);
     expect(comment).not.toContain("Explained at length.");
     expect(comment).toMatch(
-      /\n\nTheir messages are left out: GitHub limits a comment to 65,536 characters\.\n$/,
+      /\n\nTheir messages are left out: GitHub limits a comment to 65,536 characters\.\n$/u
     );
   });
 
-  test("lists only the rows that fit when even the table is too long, and says how many", () => {
-    const findings = Array.from({ length: 1000 }, (_, index) =>
-      finding(`src/a/rather/deeply/nested/directory/file-${index}.ts`, index + 1),
-    );
-    const comment = formatFindingsComment(findings, revision);
+  it("lists only the rows that fit when even the table is too long", () => {
+    const comment = tooLongTable();
+
     expect(comment.length).toBeLessThanOrEqual(65_536);
     expect(comment).toContain("\n1000 finding(s) on `abc123`.\n");
-    const listed = comment.match(/^\| ERROR \|/gm)?.length ?? 0;
+
+    const listed = rowsListed(comment);
+
     expect(listed).toBeGreaterThan(200);
     expect(listed).toBeLessThan(1000);
-    expect(comment).toContain(`src/a/rather/deeply/nested/directory/file-${listed - 1}.ts:`);
-    expect(comment).not.toContain(`src/a/rather/deeply/nested/directory/file-${listed}.ts:`);
+  });
+
+  it("says how many rows it listed, and stops at the last one that fits", () => {
+    const comment = tooLongTable();
+    const listed = rowsListed(comment);
+
+    expect(comment).toContain(
+      `src/a/rather/deeply/nested/directory/file-${listed - 1}.ts:`
+    );
+    expect(comment).not.toContain(
+      `src/a/rather/deeply/nested/directory/file-${listed}.ts:`
+    );
     expect(comment).toMatch(
       new RegExp(
         `\\n\\nOnly the first ${listed} are listed, without their messages: GitHub limits a comment to 65,536 characters\\.\\n$`,
-      ),
+        "u"
+      )
     );
   });
 });
 
-describe("parseFindings", () => {
-  test("reads the results of semgrep scan --json", () => {
+describe(parseFindings, () => {
+  it("reads the results of semgrep scan --json", () => {
     const results = [finding("src/a.ts", 1)];
-    expect(parseFindings(JSON.stringify({ version: "1.0.0", results, errors: [] }))).toEqual(
-      results,
-    );
+    expect(
+      parseFindings(JSON.stringify({ version: "1.0.0", results, errors: [] }))
+    ).toStrictEqual(results);
   });
 
-  test("rejects JSON without a results array", () => {
+  it("rejects JSON without a results array", () => {
     expect(() => parseFindings('{"errors": []}')).toThrow(
-      "Not the JSON output of semgrep scan: it has no results array",
+      "Not the JSON output of semgrep scan: it has no results array"
     );
     expect(() => parseFindings("null")).toThrow("no results array");
   });

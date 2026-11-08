@@ -46,6 +46,8 @@ pnpm run verify
 
 `verify` runs what CI runs, in order: `check:manifests`, `format:check`, `lint` (Oxlint), `check` (TypeScript), `test` (Vitest), `build` and `check:packages`. `pnpm run format` formats the code with Oxfmt. In a package, `pnpm run test`, `pnpm run check` and `pnpm run build` run its own.
 
+The lint and format rules are [Ultracite](https://www.ultracite.ai)'s presets: `oxlint.config.ts` extends its `core`, `react`, `tanstack`, `vitest` and `anti-slop` presets, and `oxfmt.config.ts` takes its formatting, leaving Markdown and JSON alone. `pnpm run fix` applies Oxlint's fixes, then Oxfmt. It holds back (`-A`) the fixes that would change what the code does or what a package declares, such as `unicorn/prefer-type-error`, which changes the class of a thrown error, and `unicorn/prefer-number-coercion`, which reads `"4.1.12"` as `NaN`. `pnpm run lint` still reports those rules. When a rule is wrong for one line, suppress that line and say why: `// oxlint-disable-next-line eslint/no-await-in-loop -- each page needs the cursor of the page before`. A type assertion needs a `// SAFETY:` comment just before its statement that names what makes it hold.
+
 ### Making the change
 
 Work on a branch in your fork. One pull request makes one change, to one package where it can. Two unrelated fixes are two pull requests.
@@ -127,7 +129,7 @@ packages/<name>/
 
 - A package ships built JavaScript and declarations from `dist/`, nothing else: `exports` lists every entry point, `types` first, and a command line tool is a `bin` in `dist/` whose source starts with `#!/usr/bin/env node`. `pnpm run check:manifests` enforces these fields.
 - `repository.url` stays exactly as written: npm compares it with the repository a trusted publish comes from and refuses one that differs.
-- What a package plugs into (React, Vite, a framework) is a peer dependency, optional when only one entry point needs it, with the version its tests use in `devDependencies`. Runtime dependencies take caret ranges. TypeScript, Vitest, `@types/node`, Oxlint and Oxfmt come from the root.
+- What a package plugs into (React, Vite, a framework) is a peer dependency, optional when only one entry point needs it, with the version its tests use in `devDependencies`. Runtime dependencies take caret ranges. TypeScript, Vitest, `@types/node`, Oxlint, Oxfmt and Ultracite come from the root.
 - Where a package runs in Node, it supports Node 22, which CI tests beside Node 24 and 26. The types come from `@types/node` 22, so type-checking rejects an API that Node 22 lacks. When Node 22 reaches its end of life on 2027-04-30, the floor moves to 24: `engines`, `@types/node` and the CI matrix together.
 
 ### TypeScript

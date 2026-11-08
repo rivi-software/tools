@@ -638,8 +638,7 @@ jobs:
       # review that runs out of time is cancelled, not failed.
       - name: Report a failed review
         if: >-
-          (failure() || cancelled()) && needs.gate.outputs.comment-id == '' &&
-          (steps.review.conclusion == 'failure' || steps.review.conclusion == 'cancelled')
+          (failure() || cancelled()) && needs.gate.outputs.comment-id == '' && (steps.review.conclusion == 'failure' || steps.review.conclusion == 'cancelled')
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ needs.gate.outputs.number }}

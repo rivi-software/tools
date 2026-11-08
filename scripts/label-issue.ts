@@ -11,83 +11,126 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { askClef, planChanges, questionsFor, removedLabels, stateFor } from "./issue-labels.ts";
+
+import {
+  askClef,
+  planChanges,
+  questionsFor,
+  removedLabels,
+  stateFor,
+} from "./issue-labels.ts";
 import type { Issue, IssueEvent, Label } from "./issue-labels.ts";
 
-const env = process.env;
+const { env } = process;
 
-async function github<T>(method: string, path: string, body?: object): Promise<T> {
-  const response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPOSITORY}${path}`, {
-    method,
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${env.GITHUB_TOKEN}`,
-      "content-type": "application/json",
-      "x-github-api-version": "2022-11-28",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(30_000),
-  });
+/** What this script sends GitHub: labels to add, a type to set, or issue field values. */
+type RequestBody =
+  | { labels: string[] }
+  | { type: string }
+  | { issue_field_values: { field_id: number; value: string }[] };
+
+const github = async <T>(
+  method: string,
+  path: string,
+  body?: RequestBody
+): Promise<T> => {
+  const response = await fetch(
+    `https://api.github.com/repos/${env.GITHUB_REPOSITORY}${path}`,
+    {
+      method,
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        "content-type": "application/json",
+        "x-github-api-version": "2022-11-28",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(30_000),
+    }
+  );
+
   if (!response.ok) {
     const text = await response.text();
     throw new Error(
-      `GitHub ${method} ${path} returned HTTP ${response.status}: ${text.slice(0, 500)}`,
+      `GitHub ${method} ${path} returned HTTP ${response.status}: ${text.slice(0, 500)}`
     );
   }
+
+  // SAFETY: GitHub answers each of these endpoints with the JSON the caller asks for.
   return (await response.json()) as T;
-}
+};
 
 /** Every event on the issue, a page of a hundred at a time. */
-async function issueEvents(number: number): Promise<IssueEvent[]> {
+const issueEvents = async (number: number): Promise<IssueEvent[]> => {
   const events: IssueEvent[] = [];
+
   for (let page = 1; ; page += 1) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- a page tells whether there is another
     const batch = await github<IssueEvent[]>(
       "GET",
-      `/issues/${number}/events?per_page=100&page=${page}`,
+      `/issues/${number}/events?per_page=100&page=${page}`
     );
+
     events.push(...batch);
-    if (batch.length < 100) return events;
+
+    if (batch.length < 100) {
+      return events;
+    }
   }
-}
+};
 
 /** What it did, and what it left for a maintainer: a line each. */
-async function labelIssue(number: number): Promise<string[]> {
+const labelIssue = async (number: number): Promise<string[]> => {
   const issue = await github<Issue>("GET", `/issues/${number}`);
-  if (issue.pull_request) throw new Error(`#${number} is a pull request.`);
+
+  if (issue.pull_request) {
+    throw new Error(`#${number} is a pull request.`);
+  }
 
   const labels = await github<Label[]>("GET", "/labels?per_page=100");
   const questions = questionsFor(issue, labels);
-  if (Object.keys(questions).length === 0) return ["It has a type, a scope, topics and fields."];
+
+  if (Object.keys(questions).length === 0) {
+    return ["It has a type, a scope, topics and fields."];
+  }
 
   const answers = await askClef(env, stateFor(issue), questions);
 
   // Read the issue again after Clef answers, so what someone set or took off in the meantime stays.
   const current = await github<Issue>("GET", `/issues/${number}`);
+
   const plan = planChanges(current, labels, questions, answers, {
     opened: env.GITHUB_EVENT_NAME === "issues",
     removed: removedLabels(await issueEvents(number)),
   });
+
   const done = [...plan.notes];
 
   if (plan.labels.length) {
     await github("POST", `/issues/${number}/labels`, { labels: plan.labels });
     done.push(`Added ${plan.labels.map((name) => `\`${name}\``).join(", ")}.`);
   }
+
   if (plan.type) {
     await github("PATCH", `/issues/${number}`, { type: plan.type });
     done.push(`Set the type to ${plan.type}.`);
   }
+
   // Never an empty list: GitHub reads that as clearing every field the issue has.
   if (plan.fields.length) {
     await github("POST", `/issues/${number}/issue-field-values`, {
-      issue_field_values: plan.fields.map(({ field, value }) => ({ field_id: field.id, value })),
+      issue_field_values: plan.fields.map(({ field, value }) => ({
+        field_id: field.id,
+        value,
+      })),
     });
     done.push(
-      `Set ${plan.fields.map(({ field, value }) => `${field.name} to ${value}`).join(", ")}.`,
+      `Set ${plan.fields.map(({ field, value }) => `${field.name} to ${value}`).join(", ")}.`
     );
   }
+
   return done;
-}
+};
 
 for (const name of [
   "GITHUB_TOKEN",
@@ -105,9 +148,16 @@ for (const name of [
 try {
   const done = await labelIssue(Number(env.ISSUE_NUMBER));
   const summary = `## Issue #${env.ISSUE_NUMBER}\n\n${done.map((line) => `- ${line}`).join("\n")}\n`;
-  if (env.GITHUB_STEP_SUMMARY) appendFileSync(env.GITHUB_STEP_SUMMARY, summary);
+
+  if (env.GITHUB_STEP_SUMMARY) {
+    appendFileSync(env.GITHUB_STEP_SUMMARY, summary);
+  }
+
   console.log(summary);
 } catch (error) {
-  console.log(`::error title=Issue labels::${(error as Error).message.replaceAll("%", "%25")}`);
+  // SAFETY: fetch, JSON.parse and this script throw Errors.
+  console.log(
+    `::error title=Issue labels::${(error as Error).message.replaceAll("%", "%25")}`
+  );
   process.exit(1);
 }

@@ -1,7 +1,7 @@
 import posthogRollupPlugin from "@posthog/rollup-plugin";
 import type { Plugin } from "vite";
 
-export type PostHogSourcemapOptions = {
+export interface PostHogSourcemapOptions {
   /** The release the maps belong to in PostHog, such as the app's name. */
   releaseName: string;
   /**
@@ -9,7 +9,7 @@ export type PostHogSourcemapOptions = {
    * `WORKERS_CI_COMMIT_SHA` on Cloudflare Workers Builds.
    */
   releaseVersion?: string;
-};
+}
 
 /**
  * Source maps for PostHog error tracking, uploaded when POSTHOG_PERSONAL_API_KEY is set (on the
@@ -18,32 +18,42 @@ export type PostHogSourcemapOptions = {
  * by default. The browser's maps are deleted after the upload so they are never served; the
  * server's maps stay on disk, because Wrangler uploads a Worker's too (`upload_source_maps`).
  */
-export function posthogSourcemaps({
+export const posthogSourcemaps = ({
   releaseName,
   releaseVersion = process.env.GITHUB_SHA || process.env.WORKERS_CI_COMMIT_SHA,
-}: PostHogSourcemapOptions): Plugin[] {
+}: PostHogSourcemapOptions): Plugin[] => {
   const personalApiKey = process.env.POSTHOG_PERSONAL_API_KEY;
-  if (!personalApiKey) return [];
+
+  if (!personalApiKey) {
+    return [];
+  }
+
   const options = {
     personalApiKey,
     projectId: process.env.POSTHOG_PROJECT_ID,
     host: process.env.POSTHOG_API_HOST || "https://us.posthog.com",
   };
+
   const release = { releaseName, releaseVersion };
+
   return [
     {
+      // SAFETY: the rollup plugin is a Vite plugin too; its own types do not say so.
       ...(posthogRollupPlugin({
         ...options,
         sourcemaps: { ...release, deleteAfterUpload: true },
       }) as Plugin),
-      applyToEnvironment: (environment) => environment.config.consumer === "client",
+      applyToEnvironment: (environment) =>
+        environment.config.consumer === "client",
     },
     {
+      // SAFETY: the rollup plugin is a Vite plugin too; its own types do not say so.
       ...(posthogRollupPlugin({
         ...options,
         sourcemaps: { ...release, deleteAfterUpload: false },
       }) as Plugin),
-      applyToEnvironment: (environment) => environment.config.consumer === "server",
+      applyToEnvironment: (environment) =>
+        environment.config.consumer === "server",
     },
   ];
-}
+};

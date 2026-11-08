@@ -4,26 +4,43 @@
  */
 
 /** The parts of a package's packument, the registry's document for it, that the plan reads. */
-export type Packument = {
+export interface Packument {
   "dist-tags": Record<string, string>;
   versions: Record<string, { repository?: string | { url?: string } }>;
   time: Record<string, string>;
-};
+}
 
-export type Copy = { version: string; tag: string };
+export interface Copy {
+  version: string;
+  tag: string;
+}
+
+/** The releases to copy, and those no dist-tag can carry. */
+export interface CopyPlan {
+  copies: Copy[];
+  leftOut: string[];
+}
 
 const REPOSITORY = "https://github.com/rivi-software/tools";
+
+/** Whether a manifest's `repository` is the short form, the URL on its own. */
+const isRepositoryUrl = (
+  repository: Packument["versions"][string]["repository"]
+): repository is string => typeof repository === "string";
 
 /**
  * Whether a version's manifest names this repository. Every release does (check:manifests
  * enforces it, and GitHub Packages links the package to the repository it names); the placeholder
  * npm publishes for staged publishing, `0.0.0-stage`, names none.
  */
-export function fromThisRepository(manifest: Packument["versions"][string]): boolean {
+export const fromThisRepository = (
+  manifest: Packument["versions"][string]
+): boolean => {
   const { repository } = manifest;
-  const url = typeof repository === "string" ? repository : repository?.url;
-  return url?.replace(/^git\+/, "").replace(/\.git$/, "") === REPOSITORY;
-}
+  const url = isRepositoryUrl(repository) ? repository : repository?.url;
+
+  return url?.replace(/^git\+/u, "").replace(/\.git$/u, "") === REPOSITORY;
+};
 
 /**
  * The releases npm has and GitHub Packages lacks, oldest first, each with the dist-tag to publish
@@ -36,28 +53,43 @@ export function fromThisRepository(manifest: Packument["versions"][string]): boo
  * choice. When the copies are done, each tag they set points where it points on npm. A version
  * with neither kind of tag is left out rather than move a tag back.
  */
-export function planCopies(
+export const planCopies = (
   npm: Packument,
-  onGitHub: ReadonlySet<string>,
-): { copies: Copy[]; leftOut: string[] } {
+  onGitHub: ReadonlySet<string>
+): CopyPlan => {
   const missing = Object.keys(npm.versions)
-    .filter((version) => !onGitHub.has(version) && fromThisRepository(npm.versions[version]))
-    .sort((a, b) => Date.parse(npm.time[a]) - Date.parse(npm.time[b]));
+    .filter(
+      (version) =>
+        !onGitHub.has(version) && fromThisRepository(npm.versions[version])
+    )
+    .toSorted((a, b) => Date.parse(npm.time[a]) - Date.parse(npm.time[b]));
+
   const ownTags = missing.map((version) => {
-    const tags = Object.keys(npm["dist-tags"]).filter((tag) => npm["dist-tags"][tag] === version);
+    const tags = Object.keys(npm["dist-tags"]).filter(
+      (tag) => npm["dist-tags"][tag] === version
+    );
+
     return tags.includes("latest") ? "latest" : tags[0];
   });
 
   const copies: Copy[] = [];
   const leftOut: string[] = [];
-  missing.forEach((version, i) => {
+
+  for (const [i, version] of missing.entries()) {
     const later = ownTags.slice(i + 1).filter((tag) => tag !== undefined);
+
     const preferred = version.includes("-")
       ? later.find((tag) => tag !== "latest")
       : later.find((tag) => tag === "latest");
+
     const tag = ownTags[i] ?? preferred ?? later[0];
-    if (tag) copies.push({ version, tag });
-    else leftOut.push(version);
-  });
+
+    if (tag) {
+      copies.push({ version, tag });
+    } else {
+      leftOut.push(version);
+    }
+  }
+
   return { copies, leftOut };
-}
+};
