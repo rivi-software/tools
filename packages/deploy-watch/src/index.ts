@@ -629,10 +629,6 @@ export interface StartOptions {
   buildFile?: string;
 }
 
-/**
- * Starts this tab's watch. Call it in the browser before the app renders, so a chunk that fails
- * during hydration is known; nothing happens on the server, in development, or a second time.
- */
 /** Whether the tab shows the page; only ever asked in the browser. */
 const pageIsVisible = () => document.visibilityState === "visible";
 
@@ -650,6 +646,10 @@ const definedAssetsDir = (): string =>
     ? __DEPLOY_WATCH_ASSETS_DIR__
     : "assets";
 
+/**
+ * Starts this tab's watch. Call it in the browser before the app renders, so a chunk that fails
+ * during hydration is known; nothing happens on the server, in development, or a second time.
+ */
 export const startDeployWatch = ({ buildFile }: StartOptions = {}): void => {
   if (watch || typeof window === "undefined") {
     return;

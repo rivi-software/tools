@@ -57,7 +57,6 @@ export const installPostHogForTests = (
   client = fake as PostHog | null;
 };
 
-/** Keep a send alive past the response. Outside a request context (waitUntil throws there) the fetch still runs. */
 /** Logs a send that failed rather than leaving its rejection unhandled; the request is long gone. */
 const warnOnFailure = async (what: string, send: Promise<unknown>) => {
   try {
@@ -68,6 +67,7 @@ const warnOnFailure = async (what: string, send: Promise<unknown>) => {
   }
 };
 
+/** Keep a send alive past the response. Outside a request context (waitUntil throws there) the fetch still runs. */
 const keepAlive = (promise: Promise<unknown>) => {
   try {
     waitUntil(promise);

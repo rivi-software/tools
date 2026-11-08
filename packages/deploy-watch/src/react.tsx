@@ -66,13 +66,7 @@ export const useNewBuildNotice = ({ module }: NewBuildNoticeOptions = {}) => {
   };
 };
 
-/**
- * For an error screen: true while a missing chunk is checked against the live build, and while the
- * page reloads onto a newer one (render a placeholder, not the error); false once the error is the
- * screen's to show, which includes a reload the user stayed through at the unsaved-work prompt.
- * The server render and any other error read false from the start. A screen that stays mounted
- * and renders again with another error checks that error afresh.
- */
+/** The error a screen shows, and where its check against the live build stands. */
 interface ChunkErrorRecovery {
   error: unknown;
   state: "checking" | "reloading" | "shown";
@@ -84,6 +78,13 @@ const startRecovery = (error: unknown): ChunkErrorRecovery => ({
   state: isWatching() && isChunkLoadError(error) ? "checking" : "shown",
 });
 
+/**
+ * For an error screen: true while a missing chunk is checked against the live build, and while the
+ * page reloads onto a newer one (render a placeholder, not the error); false once the error is the
+ * screen's to show, which includes a reload the user stayed through at the unsaved-work prompt.
+ * The server render and any other error read false from the start. A screen that stays mounted
+ * and renders again with another error checks that error afresh.
+ */
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the error an error screen caught, of any shape a thrown value can take
 export const useChunkErrorRecovery = (error: unknown): boolean => {
   const [recovery, setRecovery] = useState(() => startRecovery(error));
