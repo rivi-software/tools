@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/workers-previews",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Names Cloudflare Workers Previews after their branch, within a hostname label and without collisions, and cleans them up: deletes a branch's Previews once its Workers Builds are idle, and sweeps away the Previews whose branch is gone or whose pull requests are closed",
   "license": "MIT",
   "type": "module",
