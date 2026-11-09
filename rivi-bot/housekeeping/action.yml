@@ -77,6 +77,13 @@ runs:
         fetch-depth: 1
         persist-credentials: false
 
+    # Bun for claude-code-action, from the npm registry: install-bun.sh says why. It falls back
+    # to the action's own download from GitHub.
+    - name: Install Bun
+      id: bun
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/../install-bun.sh"
+
     # allowed_non_write_users: on a schedule there is no one to check, and when started by hand it
     # is whoever may run the workflow. It also keeps the token out of the checkout's git config.
     # Claude runs no commands here, so there is no subprocess environment to scrub.
@@ -88,6 +95,7 @@ runs:
       with:
         anthropic_api_key: ${{ inputs.anthropic-api-key }}
         github_token: ${{ inputs.github-token }}
+        path_to_bun_executable: ${{ steps.bun.outputs.path }}
         allowed_non_write_users: "*"
         settings: '{"disableAllHooks":true}'
         claude_args: >-
