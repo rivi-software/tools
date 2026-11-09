@@ -78,3 +78,47 @@ jobs:
         run: |
           echo "The Node versions together: $RESULT"
           test "$RESULT" = success
+
+  # rivi-bot/install-bun.sh gives claude-code-action a Bun from the npm registry, pinned by version
+  # and integrity. This installs it on both runner architectures, and fails when it is not the Bun
+  # the actions' claude-code-action pins, as after Dependabot moves that action.
+  rivi-bot-bun:
+    name: rivi-bot's Bun on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Bun
+        id: bun
+        run: bash rivi-bot/install-bun.sh
+
+      - name: Match claude-code-action's Bun
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUN_PATH: ${{ steps.bun.outputs.path }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BUN_PATH" ]; then
+            echo "::error::install-bun.sh installed no Bun; its warning above says why."
+            exit 1
+          fi
+          refs=$(grep -rhoE 'anthropics/claude-code-action@[0-9a-f]{40}' rivi-bot | sort -u)
+          if [ "$(wc -l <<< "$refs")" != 1 ]; then
+            echo "::error::The rivi-bot actions use different commits of claude-code-action: $(tr "\n" " " <<< "$refs")"
+            exit 1
+          fi
+          pinned=$(gh api -H Accept:application/vnd.github.raw "repos/anthropics/claude-code-action/contents/action.yml?ref=${refs#*@}" \
+            | yq '.runs.steps[] | select(.id == "setup-bun") | .with["bun-version"]')
+          installed=$("$BUN_PATH" --version)
+          echo "claude-code-action pins Bun $pinned; install-bun.sh installed $installed."
+          if [ "$installed" != "$pinned" ]; then
+            echo "::error::Move the version and integrities in rivi-bot/install-bun.sh to Bun $pinned."
+            exit 1
+          fi

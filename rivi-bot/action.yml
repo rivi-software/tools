@@ -175,6 +175,14 @@ runs:
           fi
         done
 
+    # Bun for claude-code-action, from the npm registry: install-bun.sh says why. It falls back
+    # to the action's own download from GitHub.
+    - name: Install Bun
+      id: bun
+      if: steps.pr.outputs.run == 'true' && steps.changes.outputs.scope != 'none'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/install-bun.sh"
+
     # The diff, the inline comments and the review all name `head-sha`, so a push mid-run cannot
     # move the review onto a commit Claude did not read. A follow-up review is smaller: less
     # effort, fewer turns, a lower budget. A whole review has turns to read a large pull request,
@@ -197,6 +205,7 @@ runs:
       with:
         anthropic_api_key: ${{ inputs.anthropic-api-key }}
         github_token: ${{ inputs.github-token }}
+        path_to_bun_executable: ${{ steps.bun.outputs.path }}
         allowed_non_write_users: "*"
         # Written to the user settings, the only settings source loaded below.
         settings: '{"disableAllHooks":true}'

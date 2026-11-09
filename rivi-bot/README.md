@@ -289,7 +289,7 @@ Taking the label off makes each approval good for one review: a later push needs
 
 The output `reviewed` is `true` when a review was posted.
 
-The actions run on GitHub's Linux runners, which come with `gh`, `jq`, `yq` and `git`. They use [Claude Code's GitHub Action](https://github.com/anthropics/claude-code-action), pinned to a commit.
+The actions run on GitHub's Linux runners, which come with `gh`, `jq`, `yq` and `git`. They use [Claude Code's GitHub Action](https://github.com/anthropics/claude-code-action), pinned to a commit. They give it the Bun it pins from the npm registry, checked against a pinned integrity ([`install-bun.sh`](install-bun.sh)), so they do not depend on GitHub's release downloads; when the registry fails, the action downloads Bun from GitHub itself.
 
 ## Versions
 
