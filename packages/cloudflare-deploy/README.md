@@ -66,6 +66,10 @@ In Worker code, import from the subpaths: the main entry also pulls in `node:chi
   - `validate` checks the body of the response that passed. A `validate` that throws fails the check at once.
 - **Process helpers.**
   - `runCommand` treats a non-zero exit as a result; `runOrThrow` throws on one.
+  - With `retry: { attempts }`, either runs a command again when it exits non-zero and its output shows that Cloudflare failed: a 5xx status, error code 10500, a malformed API response or a network error. It pauses 1 s (`delayMs`), then twice as long each time, and warns before each new run. Any other failure returns or throws at once, as without `retry`. It works like the [API client's retries](#cloudflare-api-client).
+    - Retries are off by default. Turn them on only for a command that is safe to repeat: `wrangler r2 object get` and `put`, or `wrangler deploy`, `wrangler versions upload` and `wrangler preview` of the same build. A command that creates a resource or applies migrations runs once.
+    - To read the output, it pipes it and passes it on to the log as it comes. The command's output then reaches no terminal, so Wrangler runs as it does in CI and asks no questions. With `capture`, the result holds the last run's output.
+    - It knows a failure only by what Wrangler prints. Commands that call the API through Cloudflare's SDK, such as `wrangler kv namespace list`, retry a 5xx themselves and then print no status, so such a failure is retried only when it carries code 10500.
   - `wranglerCommand` runs your project's own Wrangler, found through `binPath`.
   - `cloudflareApiToken` reads `CLOUDFLARE_API_TOKEN`, else asks `wrangler login` for its token.
   - `nodeScript` runs a TypeScript entry through `tsx`, which your project then needs.
@@ -91,6 +95,7 @@ await assertDeployedBindings(config);
 await withSecretsFile({ prefix: "WORKER_SECRET" }, (path) =>
   runOrThrow(wranglerCommand(["deploy", "--config", config, "--secrets-file", path]), {
     env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: accountId },
+    retry: { attempts: 3 },
   }),
 );
 await checkDeploymentHealth("https://app.example.com", { paths: ["/healthz", "/"] });
@@ -110,7 +115,7 @@ It uses only `fetch`, `FormData` and `Blob`.
 - **Other endpoints.** `call(method, path, init)` sends a request to `path` under `/accounts/<accountId>` and answers the envelope's `result`. `init` takes a `json` or `form` body, `query`, `headers`, and `idempotent` for a POST that is safe to send twice. `maybe` answers `undefined` for a 404 instead of throwing.
 - **Timeouts.** Each request gives up after `timeoutMs` (30 s by default).
 - **Errors.** A failure throws `CloudflareApiError` with the method, the path, the status and Cloudflare's error codes (`error.has(10008)`), never the token. A lookup returns `undefined` for a missing resource, so missing and failed stay apart.
-- **Retries.** With `retry: { attempts }`, the client sends a request again while Cloudflare answers 429 or 5xx or the request fails on the way. It pauses 1 s, then twice as long each time. This applies only to requests that are safe to repeat: reads, replacing writes, deletes and KV bulk deletes. A create is sent once. Retries are off by default, so Worker code keeps its own policy.
+- **Retries.** With `retry: { attempts }`, the client sends a request again while Cloudflare answers 429 or 5xx or the request fails on the way. It pauses 1 s, then twice as long each time. This applies only to requests that are safe to repeat: reads, replacing writes, deletes and KV bulk deletes. A create is sent once. Retries are off by default, so Worker code keeps its own policy. `runCommand` and `runOrThrow` [retry a Wrangler command](#deploy-scripts) the same way.
 
 ```ts
 import { cloudflareApi } from "@rivi-software/cloudflare-deploy/cloudflare-api";
@@ -277,7 +282,7 @@ From `@rivi-software/cloudflare-deploy` (Node):
 | `assertDeployedBindings(config, options?)` | Refuses placeholder D1 and KV ids in a Wrangler config; options `environment` and `previews` |
 | `withSecretsFile(options, run)`, `secretsFromEnv(prefix, env?)` | The `<PREFIX>_*` secrets in a file only you can read, deleted after `run`; options `prefix`, `env` and `listSecrets` |
 | `checkDeploymentHealth(origin, options?)` | Polls a fresh deployment until it answers; options `paths`, `validate`, `attempts`, `delayMs`, `timeoutMs` |
-| `runCommand(args, options?)`, `runOrThrow(args, options?)` | Run a command; options `cwd`, `env`, `input` (written to stdin) and `capture` (collect the output) |
+| `runCommand(args, options?)`, `runOrThrow(args, options?)` | Run a command; options `cwd`, `env`, `input` (written to stdin), `capture` (collect the output) and `retry` (run it again after a transient Cloudflare failure) |
 | `binPath(name, from?)`, `wranglerCommand(args, from?)`, `nodeScript(script, args?)` | The arguments that run a project's binary, its Wrangler, or a TypeScript file through `tsx` |
 | `cloudflareApiToken(env?)` | `CLOUDFLARE_API_TOKEN`, else the token `wrangler login` holds |
 | `sleep(ms)`, `fileExists(path)` | A pause; whether a regular file exists |
@@ -320,6 +325,7 @@ The tests in `tests/` cover:
 - the binding id check, on config objects and on JSON and JSONC files
 - the secrets file: what it holds, its mode, its removal, and the comparison with the Worker's secrets
 - the health check
+- the process helpers' retries, with a command that fails as Wrangler does
 - the API client, against a fake `fetch`
 - the retention plan, and the deploy against a fake store
 - the Worker's fallback
