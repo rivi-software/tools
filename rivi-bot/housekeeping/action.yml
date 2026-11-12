@@ -9,8 +9,8 @@ branding:
 # what has gone quiet. Claude reads the backlog and the default branch, and answers in a fixed shape
 # (--json-schema): an overview, likely duplicates, issues that look fixed already, and labels for
 # issues without any. It can read files and nothing else. The steps after it keep only issues that
-# exist and labels the repository has, and write the report. Nothing is closed, and no label is
-# taken off.
+# exist and labels the repository has and labels-deny does not hold back, and write the report.
+# Nothing is closed, and no label is taken off.
 
 inputs:
   anthropic-api-key:
@@ -32,6 +32,18 @@ inputs:
     description: "`true` also adds the repository's labels that fit to the open issues that have none; `false` only suggests them in the report."
     required: false
     default: "false"
+  labels-deny:
+    description: The labels never added or suggested, however well they fit, one a line, with `*` for any run of characters and in any case. rivi-bot's own labels (`rivi-bot:*`) are never added either.
+    required: false
+    default: |
+      needs-*
+      ready-for-*
+      duplicate
+      wontfix
+      invalid
+      breaking-change
+      good first issue
+      help wanted
   instructions:
     description: What else the report covers, or how.
     required: false
@@ -136,6 +148,7 @@ runs:
         RESULT: ${{ steps.claude.outputs.structured_output }}
         STALE_DAYS: ${{ inputs.stale-days }}
         LABELS: ${{ inputs.labels }}
+        LABELS_DENY: ${{ inputs.labels-deny }}
       run: |
         set -euo pipefail
         if [ -z "$RESULT" ]; then
@@ -143,16 +156,25 @@ runs:
           exit 1
         fi
 
-        # Only open issues, only labels the repository has, and only for issues without any.
-        # rivi-bot adds them when asked to; otherwise the report suggests them.
-        result=$(jq -c --slurpfile issues "$DIR/issues.json" --slurpfile prs "$DIR/merged.json" --slurpfile labels "$DIR/labels.json" '
+        # Only open issues, only labels the repository has and labels-deny does not hold back
+        # (rivi-bot/labels.jq), and only for issues without any. rivi-bot adds them when asked to;
+        # otherwise the report suggests them.
+        result=$(jq -c -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
+          --slurpfile issues "$DIR/issues.json" --slurpfile prs "$DIR/merged.json" --slurpfile labels "$DIR/labels.json" '
+          include "labels";
           ($issues[0] | map(.number)) as $open
           | ($issues[0] | map(select(.labels == []) | .number)) as $unlabeled
           | ($prs[0] | map(.number)) as $merged
-          | ($labels[0] | map(.name) | map(select(startswith("rivi-bot:") | not))) as $known
+          | ($labels[0] | map(.name)) as $known
+          | ($deny | deny_patterns) as $deny
+          | [.labels[] | select(.number | IN($unlabeled[])) | {number, labels: (.labels | labels_to_add($known; []; $deny))}] as $picked
           | .duplicates |= [.[] | select((.number | IN($open[])) and (.of | IN($open[])) and .number != .of)]
           | .fixed |= [.[] | select((.number | IN($open[])) and (.by == 0 or (.by | IN($merged[]))))]
-          | .labels |= [.[] | select(.number | IN($unlabeled[])) | .labels |= [unique[] | select(IN($known[]))] | select(.labels != [])]' <<< "$RESULT")
+          | .labels = [$picked[] | .labels |= .add | select(.labels != [])]
+          | .held = [$picked[] | .labels |= .held | select(.labels != [])]' <<< "$RESULT")
+        while read -r entry; do
+          echo "Left for a maintainer on #$(jq -r .number <<< "$entry") (labels-deny): $(jq -r '.labels | join(", ")' <<< "$entry")."
+        done < <(jq -c '.held[]' <<< "$result")
         if [ "$LABELS" = true ]; then
           while read -r entry; do
             number=$(jq -r .number <<< "$entry")
