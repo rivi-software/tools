@@ -3,7 +3,8 @@
  * Packages lacks, so each installs from either registry. A copy is npm's own tarball, checked
  * against the integrity npm lists for it, so both registries serve the same bytes. The first run
  * copies each package's releases from its first one; after that, a run copies what the release
- * workflow just published. github-packages-plan.ts picks the versions and their dist-tags.
+ * workflow just published. github-packages-plan.ts picks the versions and their dist-tags, and
+ * registry-request.ts makes each request to a registry with a deadline and retries.
  *   NODE_AUTH_TOKEN=<a token that writes packages> node scripts/mirror-github-packages.ts
  *   node scripts/mirror-github-packages.ts --dry-run    lists the copies and publishes nothing
  */
@@ -22,6 +23,7 @@ import path from "node:path";
 
 import { planCopies } from "./github-packages-plan.ts";
 import type { Packument } from "./github-packages-plan.ts";
+import { request } from "./registry-request.ts";
 
 const NPM = "https://registry.npmjs.org";
 const GITHUB = "https://npm.pkg.github.com";
@@ -39,36 +41,35 @@ const packument = async (
   name: string,
   token?: string
 ): Promise<Packument | undefined> => {
-  const response = await fetch(`${registry}/${name.replace("/", "%2f")}`, {
-    headers: {
-      accept: "application/json",
-      ...(token && { authorization: `Bearer ${token}` }),
-    },
-  });
+  const { ok, status, body } = await request(
+    `${registry}/${name.replaceAll("/", "%2f")}`,
+    {
+      headers: {
+        accept: "application/json",
+        ...(token && { authorization: `Bearer ${token}` }),
+      },
+    }
+  );
 
-  if (response.status === 404) {
+  if (status === 404) {
     return undefined;
   }
 
-  if (!response.ok) {
-    throw new Error(
-      `${registry} answered ${response.status}: ${await response.text()}`
-    );
+  if (!ok) {
+    throw new Error(`${registry} answered ${status}: ${body.toString()}`);
   }
 
   // SAFETY: a registry answers a packument as JSON; the plan reads only the fields it has.
-  return (await response.json()) as Packument;
+  return JSON.parse(body.toString()) as Packument;
 };
 
 /** npm's tarball for a version, once its bytes match the sha512 integrity npm lists for it. */
 const tarball = async (dist: Dist): Promise<Buffer> => {
-  const response = await fetch(dist.tarball);
+  const { ok, status, body: bytes } = await request(dist.tarball);
 
-  if (!response.ok) {
-    throw new Error(`${dist.tarball} answered ${response.status}`);
+  if (!ok) {
+    throw new Error(`${dist.tarball} answered ${status}`);
   }
-
-  const bytes = Buffer.from(await response.arrayBuffer());
 
   const expected = dist.integrity
     .split(/\s+/u)
@@ -174,7 +175,7 @@ try {
 
         const file = path.join(
           work,
-          `${name.replace("/", "+")}-${version}.tgz`
+          `${name.replaceAll("/", "+")}-${version}.tgz`
         );
 
         // oxlint-disable-next-line eslint/no-await-in-loop -- copies go in order: a later one takes back a tag an earlier one set
