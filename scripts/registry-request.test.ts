@@ -22,6 +22,10 @@ const answering = (...answers: (number | Error)[]) => {
   });
 };
 
+/** A busy or failing answer with a Retry-After header. */
+const busy = (status: number, retryAfter: string) =>
+  new Response("", { headers: { "retry-after": retryAfter }, status });
+
 /** A fetch that never answers, and rejects as fetch does when its request is aborted. */
 const silent = () =>
   vi.fn<typeof fetch>(async (_url, init) => {
@@ -96,6 +100,28 @@ describe(request, () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(console.log).toHaveBeenCalledWith(
       `${URL} answered 503: trying again in 0 seconds`
+    );
+  });
+
+  it("waits as long as a busy answer's Retry-After asks, up to its cap", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(busy(429, "1"))
+      .mockResolvedValueOnce(
+        busy(503, new Date(Date.now() + 60_000).toUTCString())
+      )
+      .mockResolvedValueOnce(new Response("{}"));
+
+    await expect(
+      request(URL, { ...FAST, fetchImpl, maxWaitMs: 10, retryMs: 1 })
+    ).resolves.toMatchObject({ status: 200 });
+    expect(console.log).toHaveBeenNthCalledWith(
+      1,
+      `${URL} answered 429: trying again in 0.01 seconds`
+    );
+    expect(console.log).toHaveBeenNthCalledWith(
+      2,
+      `${URL} answered 503: trying again in 0.01 seconds`
     );
   });
 

@@ -2,8 +2,9 @@
  * The GET requests scripts/mirror-github-packages.ts makes to npm and GitHub Packages. Each try
  * has 30 seconds to answer in full, its body included, so a registry that stops answering fails
  * the request instead of holding the release workflow. A try that timed out, did not reach the
- * registry, or found it busy (429) or failing (5xx) is followed by another, 2 and then 4 seconds
- * later, up to three tries in all.
+ * registry, or found it busy (429) or failing (5xx) is followed by another, up to three tries in
+ * all. The next try waits as long as a busy answer's Retry-After asks, up to 30 seconds, and
+ * otherwise 2 and then 4 seconds.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -20,6 +21,8 @@ export interface RequestOptions {
   timeoutMs?: number;
   /** The wait before the second try; the third waits twice that. */
   retryMs?: number;
+  /** The longest wait a busy answer's Retry-After gets. */
+  maxWaitMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -27,6 +30,22 @@ const TRIES = 3;
 
 /** An answer a later try can change: the registry was busy or failing. */
 const isBusy = (status: number): boolean => status === 429 || status >= 500;
+
+/**
+ * The wait, in milliseconds, that a Retry-After header asks for, as a number of seconds or as an
+ * HTTP date. Undefined when there is none, or none that parses.
+ */
+const retryAfter = (header: string | null): number | undefined => {
+  if (header === null) {
+    return undefined;
+  }
+
+  const ms = /^\d+$/u.test(header.trim())
+    ? Number(header) * 1000
+    : Date.parse(header) - Date.now();
+
+  return Number.isNaN(ms) ? undefined : Math.max(ms, 0);
+};
 
 /**
  * Why a try that threw failed: its deadline, or the error fetch threw. When the registry could
@@ -59,12 +78,14 @@ export const request = async (
     headers = {},
     timeoutMs = 30_000,
     retryMs = 2000,
+    maxWaitMs = 30_000,
     fetchImpl = fetch,
   } = options;
 
   const last = tried + 1 === TRIES;
   const signal = AbortSignal.timeout(timeoutMs);
   let why: string;
+  let asked: number | undefined;
 
   try {
     const response = await fetchImpl(url, { headers, signal });
@@ -76,6 +97,7 @@ export const request = async (
     }
 
     why = `answered ${response.status}`;
+    asked = retryAfter(response.headers.get("retry-after"));
   } catch (error) {
     // SAFETY: fetch and the body's read reject with Errors, and so does the signal's deadline.
     why = failure(error as Error, signal, timeoutMs);
@@ -87,7 +109,8 @@ export const request = async (
     }
   }
 
-  const wait = retryMs * (tried + 1);
+  const wait =
+    asked === undefined ? retryMs * (tried + 1) : Math.min(asked, maxWaitMs);
 
   console.log(`${url} ${why}: trying again in ${wait / 1000} seconds`);
   await sleep(wait);

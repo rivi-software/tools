@@ -78,9 +78,11 @@ jobs:
     # whatever that release did publish.
     if: ${{ !cancelled() && github.repository == 'rivi-software/tools' }}
     runs-on: ubuntu-24.04
-    # A run takes seconds. Each request to a registry gives up after three tries of 30 seconds
-    # (scripts/registry-request.ts), and this stops a run where many of them do.
-    timeout-minutes: 10
+    # A run takes seconds. A request to a registry gives up after three tries of 30 seconds and
+    # the waits between them (scripts/registry-request.ts), and the script then moves on to the
+    # next package. This leaves room for a slow registry to fail every package, so a run ends
+    # with its report rather than cut off, maybe inside npm publish.
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write # publish to GitHub Packages
