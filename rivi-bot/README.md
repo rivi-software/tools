@@ -295,6 +295,8 @@ The actions run on GitHub's Linux runners, which come with `gh`, `jq`, `yq` and 
 
 Pin the actions or the reusable workflow to a commit SHA, or to a `rivi-bot-v*` tag cut from `main`. They are versioned by tag, not published to npm. The reusable workflow runs the actions from `main` at any ref: pin the actions themselves to fix their version.
 
+Each tag has a [release](https://github.com/rivi-software/tools/releases?q=rivi-bot) that says what changed and what a caller has to do. A new major version means a caller has to change something, such as an input that was renamed; a minor one adds something, and a patch fixes something. A tag is never moved or deleted.
+
 ## License
 
 Licensed under the [MIT License](../LICENSE). Copyright © 2026 RIVI Software.
