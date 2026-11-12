@@ -1,0 +1,28 @@
+name: Question
+description: How a package or rivi-bot works, or how to use it
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask away: a question often shows where a README falls short.
+  - type: input
+    id: package
+    attributes:
+      label: Package
+      description: The package it is about, or rivi-bot, with the version if it matters.
+      placeholder: "@rivi-software/workers-coordination"
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What you are trying to do, and what you want to know. Code showing where you are helps.
+    validations:
+      required: true
+  - type: textarea
+    id: looked
+    attributes:
+      label: Where you looked
+      description: The README sections, doc comments or issues you read, and what they left open.

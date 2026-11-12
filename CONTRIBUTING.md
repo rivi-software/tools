@@ -8,7 +8,8 @@ Everyone who takes part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 [Open an issue](https://github.com/rivi-software/tools/issues/new/choose), after a look through the [existing ones](https://github.com/rivi-software/tools/issues?q=is%3Aissue).
 
-- **A bug.** Name the package and its version, and what it runs on: Node, a Worker or the browser, and the versions of Vite, React or whatever else it plugs into. Then say what you expected and what happened instead. A minimal reproduction gets it fixed fastest.
+- **A bug.** Name the package and its version, and what it runs on: Node, a Worker or the browser, and the versions of Vite, React or whatever else it plugs into. Then say what you expected and what happened instead. A minimal reproduction gets it fixed fastest. For rivi-bot, give the ref you call it at, the workflow that runs it and your `.github/rivi-bot.yml`.
+- **A README that is wrong or unclear.** Say where, and what it should say. A typo or a broken link can go straight to a pull request.
 - **A feature or a change in behaviour.** Describe the problem first, then what you would change. Agreeing on it in the issue saves you a pull request that does not merge.
 - **A question.** Open an issue too: a question often shows where a README falls short.
 - **A vulnerability.** Never in a public issue: [SECURITY.md](SECURITY.md) says how to report one privately.

@@ -1,16 +1,16 @@
 name: Bug report
-description: A package or rivi-bot does not do what its README says
+description: A package does not do what its README says
 type: Bug
 body:
   - type: markdown
     attributes:
       value: |
-        A vulnerability goes in a private report, never here: [SECURITY.md](https://github.com/rivi-software/tools/blob/main/SECURITY.md) says how.
+        A vulnerability goes in a private report, never here: [SECURITY.md](https://github.com/rivi-software/tools/blob/main/SECURITY.md) says how. For rivi-bot, use the rivi-bot bug report.
   - type: input
     id: package
     attributes:
       label: Package and version
-      description: The package and the version you installed, or the rivi-bot tag or commit you use.
+      description: The package and the version you installed.
       placeholder: "@rivi-software/workers-mail 0.1.0"
     validations:
       required: true

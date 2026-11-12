@@ -1,0 +1,57 @@
+name: rivi-bot bug report
+description: A rivi-bot job fails, or does not do what its README says
+type: Bug
+labels: ["scope:rivi-bot"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A vulnerability goes in a private report, never here: [SECURITY.md](https://github.com/rivi-software/tools/blob/main/SECURITY.md) says how. That includes a way to make rivi-bot follow instructions in a pull request or an issue, or to reach its secrets.
+
+        A run's logs can hold more than you expect. Read them before you paste them, and leave out keys and tokens.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The ref you call rivi-bot at, such as `main`, a `rivi-bot-v*` tag or a commit SHA. The reusable workflow runs its actions from `main` at any ref, so with it, also give the date of the run.
+      placeholder: rivi-software/tools/.github/workflows/rivi-bot.yml@main
+    validations:
+      required: true
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Feature
+      options:
+        - review
+        - describe
+        - triage
+        - fix
+        - ask
+        - housekeeping
+        - Setup, or more than one
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you run it
+      options:
+        - The reusable workflow
+        - The actions in a workflow of my own
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what it did instead, such as the comment it posted or the step that failed and its error. Link the run if the repository is public.
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Workflow and configuration
+      description: The workflow that runs rivi-bot, and `.github/rivi-bot.yml` if you have one.
+      render: yaml
+    validations:
+      required: true

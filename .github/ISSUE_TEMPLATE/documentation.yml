@@ -1,0 +1,24 @@
+name: Documentation
+description: A README or doc comment that is missing, wrong or unclear
+type: Task
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the code does not do what its README says and the README is right, open a bug report instead. A typo or a broken link can go straight to a pull request.
+  - type: input
+    id: location
+    attributes:
+      label: Where
+      description: The file and section, or a link to it.
+      placeholder: packages/deploy-watch/README.md, "How it works"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing, wrong or unclear
+      description: What it says now, and what it should say or what you could not find. If it is wrong, how you found out.
+    validations:
+      required: true
