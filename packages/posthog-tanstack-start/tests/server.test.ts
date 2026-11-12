@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   captureServerEvent,
@@ -42,6 +42,7 @@ describe("the Worker's PostHog client", () => {
     sent.length = 0;
     installPostHogForTests(null);
     setSecretPaths([]);
+    vi.unstubAllGlobals();
   });
 
   describe(captureServerException, () => {
@@ -100,6 +101,61 @@ describe("the Worker's PostHog client", () => {
         },
       ]);
       expect(JSON.stringify(sent)).not.toMatch(/k3y/u);
+    });
+
+    it("sends a secret page's address in the exception's message, stack and properties as the route's pattern", async () => {
+      // The real client, posthog-node's own, builds the event from the error; the request body is what PostHog gets.
+      const bodies: string[] = [];
+      vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+        const gzipped = new Response(init.body).body;
+        bodies.push(
+          await new Response(
+            gzipped?.pipeThrough(new DecompressionStream("gzip"))
+          ).text()
+        );
+
+        return Response.json({ status: 1 });
+      });
+      // A fresh module has no client yet, so it makes the real one from the Worker's vars.
+      vi.resetModules();
+      const server = await import("../src/server.js");
+      server.setSecretPaths(["/t/$token"]);
+
+      const request = new Request("https://app.example.com/t/k3y0f4t1ck3t");
+      const error = new Error(`ticket ${request.url} not found`);
+      // PostHog gets the stack as frames; this one ran from under the secret page.
+      error.stack = `Error: ${error.message}\n    at loadTicket (${request.url}/ticket.js:3:9)`;
+      server.captureServerException(error, {
+        request,
+        properties: { link: request.url },
+      });
+
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      expect(JSON.parse(bodies[0] ?? "")).toMatchObject({
+        batch: [
+          {
+            event: "$exception",
+            properties: {
+              $exception_list: [
+                {
+                  value: "ticket https://app.example.com/t/$token not found",
+                  stacktrace: {
+                    frames: [
+                      {
+                        function: "loadTicket",
+                        filename: "https://app.example.com/t/$token/ticket.js",
+                      },
+                    ],
+                  },
+                },
+              ],
+              $current_url: "https://app.example.com/t/$token",
+              link: "https://app.example.com/t/$token",
+            },
+          },
+        ],
+      });
+      expect(bodies[0]).not.toMatch(/k3y/u);
     });
 
     it("reads the person and session from the SDK's cookie on a page load", () => {

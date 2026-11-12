@@ -1,9 +1,10 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { PostHog } from "posthog-node";
+import type { BeforeSendFn } from "posthog-node";
 
 import { isString } from "./guards.js";
 import { POSTHOG_MISSING } from "./missing.js";
-import { pathRedactor } from "./secret-paths.js";
+import { pathRedactor, redactDeep } from "./secret-paths.js";
 import type { PathRedactor } from "./secret-paths.js";
 
 /** What the browser's own SDK says about who is asking, read from the request. */
@@ -17,11 +18,23 @@ let redactPath: PathRedactor = (text) => text;
 
 /**
  * The app's routes whose address is a credential (a shared ticket's page `/t/$token`), which an exception reports by
- * their pattern. Called once from the Worker's entry module, so it holds for every handler and Durable Object.
+ * their pattern: in its URL, its message, its stack and its properties. Called once from the Worker's entry module, so
+ * it holds for every handler and Durable Object.
  */
 export const setSecretPaths = (patterns: readonly string[]) => {
   redactPath = pathRedactor(patterns);
 };
+
+/**
+ * An exception's text is whatever the code that threw it wrote (a handler's ``new Error(`${request.url} not found`)``,
+ * a fetch error's address), so every string of the event posthog-node builds from it leaves with the secret paths as
+ * their pattern, as the browser's `redactSecretPaths` does. It reads `redactPath` as it sends, so a `setSecretPaths`
+ * after the client exists still holds.
+ */
+const redactException: BeforeSendFn = (event) =>
+  event.event === "$exception"
+    ? { ...event, properties: redactDeep(event.properties, redactPath) }
+    : event;
 
 /**
  * The server-side PostHog client (posthog-node resolves to its workerd build), or null when the Worker's
@@ -36,6 +49,7 @@ const posthogServer = (): PostHog | null => {
         host: env.POSTHOG_HOST,
         flushAt: 1,
         flushInterval: 0,
+        before_send: redactException,
       });
     } else {
       if (import.meta.env?.DEV && import.meta.env.MODE !== "test") {
