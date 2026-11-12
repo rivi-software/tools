@@ -104,8 +104,8 @@ With [`@rivi-software/deploy-watch`](https://github.com/rivi-software/tools/tree
 
   Neither waits for PostHog or throws: a send that fails logs a `console.warn` line, and the handler's response goes out either way.
 - **Secret paths.** A route whose address is a credential, such as a shared ticket's page `/t/$token`, reaches PostHog as its pattern, never as the link. List the patterns, as TanStack Router writes them, once for each side:
-  - In the Worker's entry module, `setSecretPaths(patterns)` covers the exceptions' `$current_url` and `$pathname`.
-  - In the posthog-js options, `before_send: redactSecretPaths(patterns)` covers every address an event or a person carries, an autocaptured link and the heatmap's keys included.
+  - In the Worker's entry module, `setSecretPaths(patterns)` covers every string in an exception: its `$current_url` and `$pathname`, the error's message and stack, and the properties you send with it. `captureServerEvent` sends its properties as you pass them.
+  - In the posthog-js options, `before_send: redactSecretPaths(patterns)` covers every address an event or a person carries: an exception's message and stack, an autocaptured link and the heatmap's keys included.
 
   Two things get past that:
   - Session replay's `$snapshot` is compressed and goes as it is. Keep replay off, or block those paths in the project settings.
@@ -119,7 +119,7 @@ With [`@rivi-software/deploy-watch`](https://github.com/rivi-software/tools/tree
 ## In your app's tests
 
 `vi.mock` does not reach a module your test worker already imported, so a test swaps the client instead:
-- `installPostHogForTests({ captureImmediate, captureExceptionImmediate })` puts a stand-in in its place.
+- `installPostHogForTests({ captureImmediate, captureExceptionImmediate })` puts a stand-in in its place. It gets the error and your properties as you passed them: the real client replaces the secret paths in them as it builds the event.
 - `installPostHogForTests(null)` turns PostHog off again.
 
 Pin `POSTHOG_PROJECT_TOKEN` empty in your test config, so no test reports to your production project.
