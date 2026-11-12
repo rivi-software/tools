@@ -1,10 +1,10 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    // Node runs the scripts as they are, stripping their types, so one imports another by its
-    // .ts name.
+    // Node runs the scripts and rivi-bot's review as they are, stripping their types, so one
+    // imports another by its .ts name.
     "erasableSyntaxOnly": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["scripts"]
+  "include": ["scripts", "rivi-bot"]
 }
