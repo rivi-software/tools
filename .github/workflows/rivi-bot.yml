@@ -14,7 +14,8 @@ name: rivi-bot
 #   pull request waits for a maintainer's approval: adding the `rivi-bot:review` label. The label
 #   stays on, so every later push is reviewed too, until a maintainer takes it off. These reviews
 #   only comment: an approval is what a prompt injection would aim for. A push to a draft is not
-#   reviewed; the label still asks for a review of one.
+#   reviewed; the label still asks for a review of one. The review job's check fails when the
+#   review found something that has to change before the pull request merges.
 # - describe: a summary in a pull request's description, and labels, when it opens.
 # - triage: a comment on a new issue, with what the issue needs, and labels.
 # - fix: commits fixes for the open review findings, or what the request asks, to the pull
@@ -648,6 +649,20 @@ jobs:
         run: |
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --body "rivi-bot could not review $HEAD_SHA ([the run]($RUN_URL)). A maintainer can re-run it."
+
+      # The check says what the review found: it fails when something has to change before the
+      # pull request merges, and passes when nothing has to. With nothing new to review, the
+      # same commit again or only a rebase since, the last review's verdict stands, so a re-run
+      # or a rebase does not turn it green. Only on pull_request_target, whose check sits on the
+      # pull request's head: a run started by a comment has its check on the default branch's
+      # latest commit, which a failure would mark red.
+      - name: Check the verdict
+        if: github.event_name == 'pull_request_target' && steps.review.outputs.needs-changes == 'true'
+        env:
+          PR_NUMBER: ${{ needs.gate.outputs.number }}
+        run: |
+          echo "::error::rivi-bot's review found something that has to change before #$PR_NUMBER merges; its comments on the pull request say what."
+          exit 1
 
   describe:
     name: describe
