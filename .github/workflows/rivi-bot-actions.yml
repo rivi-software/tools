@@ -61,7 +61,7 @@ jobs:
           fi
           refs=$(grep -rhoE 'anthropics/claude-code-action@[0-9a-f]{40}' rivi-bot | sort -u)
           if [ "$(wc -l <<< "$refs")" != 1 ]; then
-            echo "::error::The rivi-bot actions use different commits of claude-code-action: $(tr "\n" " " <<< "$refs")"
+            echo "::error::The rivi-bot actions use different commits of claude-code-action: $(paste -sd " " - <<< "$refs"). Move every rivi-bot/**/action.yml to the same commit, in this pull request."
             exit 1
           fi
           pinned=$(gh api -H Accept:application/vnd.github.raw "repos/anthropics/claude-code-action/contents/action.yml?ref=${refs#*@}" \
@@ -92,7 +92,11 @@ jobs:
           # "<file> <owner/repo[/path]@sha> <input>".
           uses=$(find rivi-bot -name action.yml -print0 \
             | xargs -0 yq -N '.runs.steps[] | select(.uses and .with) | filename + " " + .uses + " " + (.with | keys)[]' \
-            | grep -E '^[^ ]+ [^./][^ @]*@[0-9a-f]{40} [^ ]+$' | sort -u)
+            | { grep -E '^[^ ]+ [^./][^ @]*@[0-9a-f]{40} [^ ]+$' || true; } | sort -u)
+          if [ -z "$uses" ]; then
+            echo "::error::Read no input that rivi-bot's actions set on a pinned action: this step no longer parses them."
+            exit 1
+          fi
           failed=0
           read -ra refs <<< "$(cut -d" " -f2 <<< "$uses" | sort -u | tr "\n" " ")"
           for ref in "${refs[@]}"; do
