@@ -160,7 +160,7 @@ const RUBRICS = new Map<IssueField, string[]>([
 ]);
 
 const REPOSITORY =
-  "rivi-software/tools: small npm packages for Cloudflare Workers, Vite, React and TanStack Start, and rivi-bot, Claude in GitHub Actions";
+  "rivi-software/tools: small npm packages for Cloudflare Workers, Vite, React and TanStack Start, and rivi-bot, AI reviews and more in GitHub Actions";
 
 const TEAM = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
