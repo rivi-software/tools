@@ -50,12 +50,18 @@ const byAsset = (a: AssetFile, b: AssetFile): number => {
 };
 
 /**
- * Whether `file` is a file, or a link to one: `stat` follows links. A link to nothing, or one in
- * a loop of links, is not a file.
+ * The codes `stat` fails with for a link that points to nothing: its target is missing
+ * (`ENOENT`), goes through a file (`ENOTDIR`), or is a loop of links (`ELOOP`).
+ */
+const NO_TARGET = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
+
+/**
+ * Whether `file` is a file, or a link to one: `stat` follows links. A link that points to
+ * nothing is not a file.
  */
 export const isFile = async (file: string): Promise<boolean> => {
   const stats = await stat(file).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT" || error.code === "ELOOP") {
+    if (error.code !== undefined && NO_TARGET.has(error.code)) {
       return;
     }
 

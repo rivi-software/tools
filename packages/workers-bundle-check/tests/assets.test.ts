@@ -137,6 +137,10 @@ describe("links in the assets directory", () => {
     symlinkSync("../shared/fonts", path.join(assets, "private"), "dir");
     // Wrangler fails on a link to nothing it would serve, and passes over one it leaves out.
     symlinkSync("../nowhere", path.join(assets, "private-dangling"));
+    symlinkSync(
+      "../shared/app.js.map/inner",
+      path.join(assets, "private-through-a-file")
+    );
 
     // At debug level, a dry run logs each path it reads from the directory, and each it leaves out.
     const output = await wrangler(
