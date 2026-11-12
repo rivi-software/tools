@@ -39,7 +39,7 @@ In `packages/<name>/`:
 
 ## 4. Verify and open the pull request
 
-`pnpm run verify`. Its `check:manifests` checks the manifest, and its `check:packages` packs the package and imports every entry point as someone installing it from npm would.
+`pnpm run verify`. Its `check:manifests` checks the manifest, the row in the root README and the line in `labeler.yml`, and its `check:packages` packs the package and imports every entry point as someone installing it from npm would.
 
 Then load the `create-pr` skill, with a `feat(<name>): …` title. Tell the user that the first version is published by hand once the pull request merges ("The first release of a new package" in `CONTRIBUTING.md`): it needs their npm login, then trusted publishing on npmjs.com and public visibility on GitHub Packages.
 
