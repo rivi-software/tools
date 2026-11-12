@@ -1,7 +1,7 @@
 /**
- * The next rivi-bot release that scripts/release-rivi-bot.ts drafts: its version and its notes. A
- * version is a `rivi-bot-v<major>.<minor>.<patch>` tag, and CONTRIBUTING.md ("A rivi-bot release")
- * says which part a change raises.
+ * The next rivi-bot release that scripts/release-rivi-bot.ts drafts: the checks that rule one out,
+ * its version and its notes. A version is a `rivi-bot-v<major>.<minor>.<patch>` tag, and
+ * CONTRIBUTING.md ("A rivi-bot release") says which part a change raises.
  */
 
 /** What a rivi-bot release holds: the actions and the reusable workflow. */
@@ -145,7 +145,7 @@ export const releaseNotes = ({
   );
 
   const sections = [
-    `Pin an action to this tag, such as \`rivi-software/tools/rivi-bot@${tag}\` or \`rivi-software/tools/rivi-bot/triage@${tag}\`, or to its commit, \`${sha}\`.`,
+    `Pin to this tag, such as \`rivi-software/tools/rivi-bot@${tag}\` or \`rivi-software/tools/rivi-bot/triage@${tag}\` for an action and \`rivi-software/tools/.github/workflows/rivi-bot.yml@${tag}\` for the reusable workflow, or to its commit, \`${sha}\`.`,
   ];
 
   if (rest.length > 0) {
@@ -157,4 +157,189 @@ export const releaseNotes = ({
   }
 
   return `${sections.join("\n\n")}\n`;
+};
+
+/** The ref of main's head in the clone. */
+export const MAIN = "origin/main";
+
+export type Requested = Bump | "auto";
+
+/** CI's run on a commit, as GitHub reports it. */
+export interface CiRun {
+  url: string;
+  status: string;
+  conclusion: string | null;
+}
+
+/** A rivi-bot release that waits as a draft. */
+export interface Draft {
+  tag: string;
+  url: string;
+}
+
+/**
+ * What planRelease reads from the clone and from GitHub: git and the API in
+ * scripts/release-rivi-bot.ts, a fake in the tests.
+ */
+export interface ReleaseSource {
+  /** The full SHA of a commit, `MAIN` included, or undefined when the clone has no such commit. */
+  resolve: (commit: string) => string | undefined;
+  /** Whether `ancestor` is `commit` or comes before it. Each is a SHA, a tag or `MAIN`. */
+  isAncestor: (ancestor: string, commit: string) => boolean;
+  tags: () => readonly string[];
+  /** The commits after `from`, up to and with `to`, that change RIVI_BOT_PATHS, newest first. */
+  commits: (from: string, to: string) => readonly Commit[];
+  /** CI's last run on the commit as a push to main. */
+  ciRun: (sha: string) => Promise<CiRun | undefined>;
+  waitingDraft: () => Promise<Draft | undefined>;
+}
+
+export interface ReleasePlan {
+  tag: string;
+  sha: string;
+  /** The tag of the release before this one. */
+  last: string;
+  commits: readonly Commit[];
+  bump: Bump;
+  requested: Requested;
+  notes: string;
+  warnings: string[];
+  /** CI's run that passed on the commit. */
+  ci: string;
+}
+
+const isRequested = (value: string | undefined): value is Requested =>
+  value === "auto" ||
+  value === "major" ||
+  value === "minor" ||
+  value === "patch";
+
+const FETCH = "Fetch main and its tags first: git fetch origin main --tags";
+
+/** What the workflow's run asks for. */
+export interface ReleaseInput {
+  /** auto, major, minor or patch. */
+  bump: string | undefined;
+  /** A commit SHA, or empty for the head of main. */
+  commit: string | undefined;
+  /** The ref the workflow runs from, unset outside GitHub Actions. */
+  ref: string | undefined;
+}
+
+/** The part the run asks to raise and the commit it names, once both are checked. */
+const checkInput = ({ bump, commit, ref }: ReleaseInput) => {
+  if (!isRequested(bump)) {
+    throw new Error(
+      `BUMP is ${bump || "unset"}: set it to auto, major, minor or patch.`
+    );
+  }
+
+  // A run from another branch would run that branch's copy of the script.
+  if (ref && ref !== "refs/heads/main") {
+    throw new Error(`Run the workflow from main, not ${ref}.`);
+  }
+
+  const name = commit?.trim() || MAIN;
+
+  if (name !== MAIN && !/^[\da-f]{7,40}$/iu.test(name)) {
+    throw new Error(`COMMIT is not a commit SHA: ${name}`);
+  }
+
+  return { requested: bump, commit: name };
+};
+
+/** The URL of CI's run on the commit, once it has passed. */
+const checkCi = (run: CiRun | undefined, sha: string): string => {
+  if (!run) {
+    throw new Error(`CI has not run on ${sha} as a push to main.`);
+  }
+
+  if (run.status !== "completed") {
+    throw new Error(
+      `CI is still running on ${sha}: ${run.url}. Run this again once it passes.`
+    );
+  }
+
+  if (run.conclusion !== "success") {
+    throw new Error(
+      `CI ended as ${run.conclusion} on ${sha}: ${run.url}. Re-run it, and run this again once it passes.`
+    );
+  }
+
+  return run.url;
+};
+
+/**
+ * The release to draft, or an error that says why there is none. The clone is checked before
+ * GitHub is asked: the run's inputs, then the commit (on main, after the last release, changing
+ * rivi-bot), then CI on the commit, then a draft that waits. A tag is never moved, so each check
+ * stops the run rather than warn, except a bump lower than the commit titles call for, which a
+ * maintainer may mean.
+ */
+export const planRelease = async (
+  input: ReleaseInput,
+  source: ReleaseSource
+): Promise<ReleasePlan> => {
+  const { requested, commit } = checkInput(input);
+  const sha = source.resolve(commit);
+
+  if (!sha) {
+    throw new Error(`${commit} is not a commit in this clone. ${FETCH}`);
+  }
+
+  if (!source.isAncestor(sha, MAIN)) {
+    throw new Error(`${sha} is not on main.`);
+  }
+
+  const last = latestTag(source.tags());
+  const lastVersion = last && parseTag(last);
+
+  if (!last || !lastVersion) {
+    throw new Error(`There is no rivi-bot-v* tag to follow. ${FETCH}`);
+  }
+
+  if (!source.isAncestor(last, sha)) {
+    throw new Error(
+      `${sha} comes before ${last}, or beside it: a release follows the last one.`
+    );
+  }
+
+  const commits = source.commits(last, sha);
+
+  if (commits.length === 0) {
+    throw new Error(
+      `Nothing in ${RIVI_BOT_PATHS.join(" or ")} changed between ${last} and ${sha}.`
+    );
+  }
+
+  const fromTitles = bumpForAll(commits);
+  const bump = requested === "auto" ? fromTitles : requested;
+  const tag = tagFor(nextVersion(lastVersion, bump));
+
+  const warnings = isHigher(fromTitles, bump)
+    ? [
+        `The commit titles call for a ${fromTitles} release, and the run asked for ${bump}. Check that no change needs a caller to act.`,
+      ]
+    : [];
+
+  const ci = checkCi(await source.ciRun(sha), sha);
+  const draft = await source.waitingDraft();
+
+  if (draft) {
+    throw new Error(
+      `${draft.tag} waits as a draft: ${draft.url}. Publish or delete it, then run this again.`
+    );
+  }
+
+  return {
+    tag,
+    sha,
+    last,
+    commits,
+    bump,
+    requested,
+    notes: releaseNotes({ tag, sha, commits }),
+    warnings,
+    ci,
+  };
 };
