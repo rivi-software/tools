@@ -1,8 +1,8 @@
 /**
  * The `semgrep-github-report` command: reads the findings `semgrep scan --json` wrote, then creates
  * or updates the pull request's findings comment (`--mode pr`) or lists them in the job summary
- * (`--mode summary`). It takes what it needs from the environment GitHub Actions sets; cli.ts runs
- * it with the process's.
+ * (`--mode summary`, and `--mode pr` on a pull request from a fork, whose token cannot comment). It
+ * takes what it needs from the environment GitHub Actions sets; cli.ts runs it with the process's.
  */
 
 import { appendFileSync, readFileSync } from "node:fs";
@@ -18,7 +18,8 @@ import type { Revision, SemgrepFinding } from "./index.js";
 
 export const USAGE = `Usage: semgrep-github-report --mode pr|summary [options]
 
-  --mode pr          create or update the pull request's findings comment (needs GITHUB_TOKEN)
+  --mode pr          create or update the pull request's findings comment (needs GITHUB_TOKEN),
+                     or list them in the job summary when the pull request comes from a fork
   --mode summary     list the findings in the job summary, or print them outside GitHub Actions
   --findings <file>  the output of semgrep scan --json (default: semgrep-findings.json)
   --pr <number>      the pull request (default: the one in the pull_request event)
@@ -28,11 +29,10 @@ export const USAGE = `Usage: semgrep-github-report --mode pr|summary [options]
 It reads GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_EVENT_PATH, GITHUB_STEP_SUMMARY, GITHUB_API_URL
 and GITHUB_SERVER_URL as GitHub Actions sets them.`;
 
-// Follows GitHub's 403 when it refuses to create or update the comment.
+// Follows GitHub's 403 when it refuses to create or update the comment. A pull request from a fork
+// never gets here: the command lists its findings in the job summary instead.
 const FORBIDDEN_HINT =
-  "The token may not write comments here. The job needs `pull-requests: write`, and a pull request " +
-  "from a fork gets a read-only token whatever the workflow asks for: list its findings with " +
-  "--mode summary instead.";
+  "The token may not write comments here: the job needs `pull-requests: write`.";
 
 type Env = Record<string, string | undefined>;
 
@@ -118,18 +118,43 @@ const loadFindings = (path: string): SemgrepFinding[] => {
   }
 };
 
-/** `--pr`, or else the pull request of the event that started the workflow. */
-const pullRequestNumber = (option: string | undefined, env: Env): number => {
-  let value: unknown = option;
+/** The fields of the event that started the workflow that the command reads. */
+interface WorkflowEvent {
+  pull_request?: {
+    number?: unknown;
+    /** `repo` is null once the fork is deleted. */
+    head?: { repo?: { full_name?: unknown } | null };
+  };
+}
 
-  if (value === undefined && env.GITHUB_EVENT_PATH) {
-    // SAFETY: GitHub Actions writes the event as JSON; `Number(value)` below checks what it found.
-    const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf-8")) as {
-      pull_request?: { number?: unknown };
-    };
-
-    value = event.pull_request?.number;
+/** The event in `GITHUB_EVENT_PATH`, or an empty one outside GitHub Actions. */
+const readEvent = (env: Env): WorkflowEvent => {
+  if (!env.GITHUB_EVENT_PATH) {
+    return {};
   }
+
+  // SAFETY: GitHub Actions writes the event as JSON, and each read of it checks what it finds.
+  return JSON.parse(
+    readFileSync(env.GITHUB_EVENT_PATH, "utf-8")
+  ) as WorkflowEvent;
+};
+
+/**
+ * Whether the event is a pull request from another repository, or from a fork since deleted.
+ * GitHub gives the workflows such a pull request starts a read-only `GITHUB_TOKEN`.
+ */
+const comesFromFork = (event: WorkflowEvent, repo: string): boolean => {
+  const head = event.pull_request?.head;
+
+  return head !== undefined && head.repo?.full_name !== repo;
+};
+
+/** `--pr`, or else the pull request of the event that started the workflow. */
+const pullRequestNumber = (
+  option: string | undefined,
+  event: WorkflowEvent
+): number => {
+  const value = option ?? event.pull_request?.number;
 
   if (value === undefined) {
     throw new Error(
@@ -213,6 +238,23 @@ const findSemgrepPrComment = async (
   }
 };
 
+/** Appends the findings to the job summary, or returns them outside GitHub Actions. */
+const listInSummary = (
+  findings: SemgrepFinding[],
+  revision: Revision,
+  env: Env
+): string => {
+  const summary = formatFindingsSummary(findings, revision);
+
+  if (!env.GITHUB_STEP_SUMMARY) {
+    return summary;
+  }
+
+  appendFileSync(env.GITHUB_STEP_SUMMARY, summary);
+
+  return `Listed ${findings.length} finding(s) in the job summary.`;
+};
+
 /** Runs the command with these arguments and environment; resolves to what it prints. */
 export const main = async (argv: string[], env: Env): Promise<string> => {
   const options = parseOptions(argv);
@@ -232,15 +274,16 @@ export const main = async (argv: string[], env: Env): Promise<string> => {
   const findings = loadFindings(options.findings);
 
   if (options.mode === "summary") {
-    const summary = formatFindingsSummary(findings, revision);
+    return listInSummary(findings, revision, env);
+  }
 
-    if (!env.GITHUB_STEP_SUMMARY) {
-      return summary;
-    }
+  const event = readEvent(env);
+  const prNumber = pullRequestNumber(options.pr, event);
 
-    appendFileSync(env.GITHUB_STEP_SUMMARY, summary);
+  if (comesFromFork(event, repo)) {
+    const why = `Pull request #${prNumber} comes from a fork, whose workflows GitHub gives a read-only token: listing its findings in the job summary instead of a comment.`;
 
-    return `Listed ${findings.length} finding(s) in the job summary.`;
+    return `${why}\n${listInSummary(findings, revision, env)}`;
   }
 
   const github = {
@@ -248,7 +291,6 @@ export const main = async (argv: string[], env: Env): Promise<string> => {
     token: requireEnv(env, "GITHUB_TOKEN"),
   };
 
-  const prNumber = pullRequestNumber(options.pr, env);
   const body = formatFindingsComment(findings, revision);
   // A pull request without findings gets no comment, but one it already has says they are gone.
   const existing = await findSemgrepPrComment(github, repo, prNumber);

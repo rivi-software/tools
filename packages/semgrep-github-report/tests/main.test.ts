@@ -39,7 +39,10 @@ const eventFile = (event: {
   action?: string;
   number?: number;
   ref?: string;
-  pull_request?: { number?: unknown };
+  pull_request?: {
+    number?: unknown;
+    head?: { repo: { full_name: string } | null };
+  };
   workflow_run?: { pull_requests: unknown[] };
 }): string => {
   const file = path.join(dir, "event.json");
@@ -49,7 +52,10 @@ const eventFile = (event: {
   return file;
 };
 
-/** What GitHub Actions sets in a job on a pull_request event, and the token the step passes. */
+/**
+ * What GitHub Actions sets in a job on a pull_request event from a branch of the repository, and
+ * the token the step passes.
+ */
 const pullRequestEnv = () => ({
   GITHUB_REPOSITORY: "acme/app",
   GITHUB_SHA: "abc123",
@@ -58,7 +64,7 @@ const pullRequestEnv = () => ({
   GITHUB_EVENT_PATH: eventFile({
     action: "synchronize",
     number: 7,
-    pull_request: { number: 7 },
+    pull_request: { number: 7, head: { repo: { full_name: "acme/app" } } },
   }),
   GITHUB_TOKEN: "ghs_example",
 });
@@ -295,7 +301,44 @@ describe(main, () => {
       );
     });
 
-    it("explains a refused comment: no pull-requests: write, or a fork's read-only token", async () => {
+    it.each([
+      { from: "a fork", repo: { full_name: "contributor/app" } },
+      { from: "a fork since deleted", repo: null },
+    ])(
+      "lists the findings of a pull request from $from in the job summary, with no request to GitHub",
+      async ({ repo }) => {
+        const requests = stubGitHub();
+        const summary = path.join(dir, "step-summary.md");
+
+        const env = {
+          ...pullRequestEnv(),
+          GITHUB_EVENT_PATH: eventFile({
+            action: "synchronize",
+            number: 7,
+            pull_request: { number: 7, head: { repo } },
+          }),
+          GITHUB_STEP_SUMMARY: summary,
+        };
+
+        const output = await main(
+          ["--mode", "pr", "--findings", findingsFile(finding("src/a.ts", 3))],
+          env
+        );
+
+        expect(requests).toHaveLength(0);
+        expect(output).toBe(
+          "Pull request #7 comes from a fork, whose workflows GitHub gives a read-only token: listing its findings in the job summary instead of a comment.\n" +
+            "Listed 1 finding(s) in the job summary."
+        );
+        expect(readFileSync(summary, "utf-8")).toBe(
+          "## Semgrep findings on `abc123` (1)\n\n" +
+            "| Severity | Rule | Location |\n| --- | --- | --- |\n" +
+            "| ERROR | `example.rule` | [`src/a.ts:3`](https://github.com/acme/app/blob/abc123/src/a.ts#L3) |\n"
+        );
+      }
+    );
+
+    it("fails when GitHub refuses the comment on a pull request from the repository itself", async () => {
       stubGitHub(
         json([]),
         json(
@@ -308,9 +351,7 @@ describe(main, () => {
         main(["--mode", "pr", "--findings", findings], pullRequestEnv())
       ).rejects.toThrow(
         'GitHub API 403 POST /repos/acme/app/issues/7/comments: {"message":"Resource not accessible by integration","status":"403"}\n' +
-          "The token may not write comments here. The job needs `pull-requests: write`, and a pull " +
-          "request from a fork gets a read-only token whatever the workflow asks for: list its " +
-          "findings with --mode summary instead."
+          "The token may not write comments here: the job needs `pull-requests: write`."
       );
     });
 
@@ -347,7 +388,7 @@ describe(main, () => {
         "Invalid pull request number: seven"
       );
       await expect(
-        main(args, { ...env, GITHUB_TOKEN: undefined })
+        main(args, { ...pullRequestEnv(), GITHUB_TOKEN: undefined })
       ).rejects.toThrow("Missing required environment variable: GITHUB_TOKEN");
     });
   });
