@@ -206,7 +206,7 @@ export const modulePath = (
  * writes after it. A line comment runs to the end of its line, so that the pattern matches each
  * comment one way only.
  */
-export const AFTER_SOURCE_MAPPING_URL = String.raw`(?:\s|\*\/|\/\/[^\n\r  ]*(?![^\n\r  ])|\/\*(?:[^*]|\*(?!\/))*\*\/)*$`;
+export const AFTER_SOURCE_MAPPING_URL = String.raw`(?:\s|\*\/|\/\/[^\n\r\u2028\u2029]*(?![^\n\r\u2028\u2029])|\/\*(?:[^*]|\*(?!\/))*\*\/)*$`;
 
 /** The `sourceMappingURL` comment of a built file, which only whitespace and comments follow. */
 const SOURCE_MAPPING_URL = new RegExp(

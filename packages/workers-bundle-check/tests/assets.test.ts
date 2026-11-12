@@ -221,6 +221,23 @@ describe("an inline source map", () => {
     ).toBeFalsy();
   });
 
+  it("is not a comment that code follows", () => {
+    expect(
+      hasInlineSourceMap(`a();\n//# sourceMappingURL=${data}\nfoo();`)
+    ).toBeFalsy();
+    expect(
+      hasInlineSourceMap(
+        `a();\n//# sourceMappingURL=${data}\n//# debugId=85314830-023f-4cf1-a267-535f4e37bb17\nfoo();`
+      )
+    ).toBeFalsy();
+    // U+2028 ends a line comment as a line feed does, so `foo();` is code.
+    expect(
+      hasInlineSourceMap(
+        `a();\n//# sourceMappingURL=${data}\n//# debugId=x\u2028foo();`
+      )
+    ).toBeFalsy();
+  });
+
   it("is neither a map in a file of its own nor a string that mentions one", () => {
     expect(
       hasInlineSourceMap("a();\n//# sourceMappingURL=a.js.map")

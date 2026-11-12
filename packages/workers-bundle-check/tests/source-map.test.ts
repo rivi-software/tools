@@ -170,6 +170,32 @@ describe(readSourceMap, () => {
     expect(modules).toStrictEqual(names.map((name) => [name, ["src/a.ts"]]));
   });
 
+  it("reads no map from a comment that code follows", async () => {
+    const dir = temporaryDirectory();
+    const debugId = "//# debugId=85314830-023f-4cf1-a267-535f4e37bb17";
+
+    write(dir, {
+      "src/a.ts": "",
+      "dist/maps/app.js.map": JSON.stringify({
+        ...map,
+        sources: ["../../src/a.ts"],
+      }),
+      "dist/code-after.js":
+        "a();\n//# sourceMappingURL=maps/app.js.map\nfoo();\n",
+      "dist/code-after-debug-id.js": `a();\n//# sourceMappingURL=maps/app.js.map\n${debugId}\nfoo();\n`,
+    });
+
+    const found = await Promise.all(
+      ["code-after", "code-after-debug-id"].map(async (name) => {
+        const file = path.join(dir, "dist", `${name}.js`);
+
+        return readSourceMap(file, await readText(file), dir);
+      })
+    );
+
+    expect(found).toStrictEqual([undefined, undefined]);
+  });
+
   it("refuses a map it cannot read", async () => {
     const dir = temporaryDirectory();
     write(dir, {
