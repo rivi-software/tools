@@ -113,6 +113,8 @@ The command reads the `results` of `semgrep scan --json` and links each finding 
 
 The comment has a table of the findings (severity, rule ID linked to the rule's page when Semgrep gives a shortlink, location linked to the line), then each finding's message, rule link and fingerprint. The fingerprint is Semgrep's own when Semgrep is logged in; without a login `semgrep scan` reports `requires login` instead, and the command uses the first 40 hex digits of a SHA-256 of the rule ID, path, and start and end lines, which stay the same while the finding does not move.
 
+A finding's path and message can hold text from the scanned code, which the pull request's author wrote, so the comment shows them as written. The path and the rule ID go in code spans, on one line, with each `|` escaped in the table. In a message, an invisible zero-width joiner (U+200D) goes after an `@` that would mention someone, a `<` that would open HTML such as `<!--`, and an `&` that would open a character reference such as `&#64;`, and before a line's ```` ``` ```` or `~~~`. So a mention notifies nobody, and nothing hides the rest of the comment or turns it into code. Links and email addresses keep working, and text copied from a message can carry those joiners. The job summary's table is written the same way.
+
 `--mode summary` appends the same table, under a heading with the commit and the number of findings, to the file in `GITHUB_STEP_SUMMARY`; where that is not set, it prints it.
 
 It prints what it did, such as the comment's URL. When it cannot do it (bad options, findings it cannot read, a request GitHub refuses or never answers), it prints why and exits 1. It calls the API at `GITHUB_API_URL`, so it works on GitHub Enterprise Server too.
