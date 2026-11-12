@@ -85,6 +85,7 @@ runs:
         GH_REPO: ${{ github.repository }}
         ISSUE: ${{ inputs.issue }}
         DUPLICATES: ${{ inputs.duplicates }}
+        LABELS_DENY: ${{ inputs.labels-deny }}
       run: |
         set -euo pipefail
         if [ -z "$ISSUE" ]; then
@@ -104,7 +105,12 @@ runs:
         dir="$RUNNER_TEMP/rivi-bot"
         rm -rf "$dir" && mkdir -p "$dir"
         gh issue view "$ISSUE" --json number,title,body,author,labels,createdAt,comments > "$dir/issue.json"
-        gh label list --limit 1000 --json name,description > "$dir/labels.json"
+        # Claude is shown only the labels it may add (rivi-bot/labels.jq); the step after it checks
+        # its answer against them all.
+        known="$RUNNER_TEMP/rivi-bot-labels.json"
+        gh label list --limit 1000 --json name,description > "$known"
+        jq -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
+          'include "labels"; addable($deny | deny_patterns)' "$known" > "$dir/labels.json"
         if [ "$DUPLICATES" = true ]; then
           gh issue list --state all --limit 500 --json number,title,state,labels --jq "map(select(.number != $ISSUE))" > "$dir/issues.json"
         else
@@ -113,6 +119,7 @@ runs:
         {
           echo "run=true"
           echo "dir=$dir"
+          echo "labels=$known"
         } >> "$GITHUB_OUTPUT"
 
     # The default branch, shallow, and without the token: Claude reads the files, nothing runs them.
@@ -162,7 +169,7 @@ runs:
         prompt: |
           Triage issue #${{ inputs.issue }} in ${{ github.repository }}, so that a maintainer can act on it quickly. The default branch is checked out here, shallow; read any file in it. Its guides (AGENTS.md, CONTRIBUTING.md and the READMEs, wherever they are) say how the project works. In ${{ steps.issue.outputs.dir }}:
           - issue.json: the issue and its comments
-          - labels.json: the repository's labels, with what each is for
+          - labels.json: the repository's labels you may add, with what each is for
           - issues.json: the repository's other issues, open and closed, most recent first
 
           Read the code the issue is about before you answer. Answer with these fields; a field you are not asked for, or have nothing for, is empty.
@@ -186,6 +193,7 @@ runs:
         LOGIN: ${{ inputs.login }}
         ISSUE: ${{ inputs.issue }}
         DIR: ${{ steps.issue.outputs.dir }}
+        KNOWN_LABELS: ${{ steps.issue.outputs.labels }}
         RESULT: ${{ steps.claude.outputs.structured_output }}
         LABELS: ${{ inputs.labels }}
         LABELS_DENY: ${{ inputs.labels-deny }}
@@ -246,7 +254,7 @@ runs:
         # (rivi-bot/labels.jq).
         if [ "$LABELS" = true ]; then
           labels=$(jq -c -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
-            --slurpfile known "$DIR/labels.json" --slurpfile issue "$DIR/issue.json" '
+            --slurpfile known "$KNOWN_LABELS" --slurpfile issue "$DIR/issue.json" '
             include "labels";
             .labels | labels_to_add($known[0] | map(.name); $issue[0].labels | map(.name); $deny | deny_patterns)' <<< "$RESULT")
           add=$(jq -c .add <<< "$labels")

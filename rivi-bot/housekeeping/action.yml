@@ -67,6 +67,7 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         GH_REPO: ${{ github.repository }}
+        LABELS_DENY: ${{ inputs.labels-deny }}
       run: |
         set -euo pipefail
         dir="$RUNNER_TEMP/rivi-bot"
@@ -78,9 +79,17 @@ runs:
           --jq 'map(.labels |= map(.name) | .author |= .login)' > "$dir/pull-requests.json"
         gh pr list --state merged --limit 100 --json number,title,body,mergedAt \
           --jq 'map(.body |= (. // "")[0:1500])' > "$dir/merged.json"
-        gh label list --limit 1000 --json name,description > "$dir/labels.json"
+        # Claude is shown only the labels it may add (rivi-bot/labels.jq); the step after it checks
+        # its answer against them all.
+        known="$RUNNER_TEMP/rivi-bot-labels.json"
+        gh label list --limit 1000 --json name,description > "$known"
+        jq -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
+          'include "labels"; addable($deny | deny_patterns)' "$known" > "$dir/labels.json"
         echo "Read $(jq length "$dir/issues.json") open issues, $(jq length "$dir/pull-requests.json") open pull requests and $(jq length "$dir/merged.json") merged ones."
-        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        {
+          echo "dir=$dir"
+          echo "labels=$known"
+        } >> "$GITHUB_OUTPUT"
 
     # The default branch, shallow, and without the token: Claude reads the files, nothing runs them.
     - name: Check out the repository
@@ -127,7 +136,7 @@ runs:
           - issues.json: the open issues, with the start of each body
           - pull-requests.json: the open pull requests
           - merged.json: the pull requests merged most recently, with the start of each body
-          - labels.json: the repository's labels, with what each is for
+          - labels.json: the repository's labels you may add, with what each is for
 
           Answer with these fields; a list with nothing to say is empty.
           - overview: what the backlog is about, in Markdown, under 150 words: the themes, what looks most urgent, and what the maintainers could close or merge soon. Refer to issues and pull requests as #number.
@@ -145,6 +154,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         LOGIN: ${{ inputs.login }}
         DIR: ${{ steps.backlog.outputs.dir }}
+        KNOWN_LABELS: ${{ steps.backlog.outputs.labels }}
         RESULT: ${{ steps.claude.outputs.structured_output }}
         STALE_DAYS: ${{ inputs.stale-days }}
         LABELS: ${{ inputs.labels }}
@@ -160,7 +170,7 @@ runs:
         # (rivi-bot/labels.jq), and only for issues without any. rivi-bot adds them when asked to;
         # otherwise the report suggests them.
         result=$(jq -c -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
-          --slurpfile issues "$DIR/issues.json" --slurpfile prs "$DIR/merged.json" --slurpfile labels "$DIR/labels.json" '
+          --slurpfile issues "$DIR/issues.json" --slurpfile prs "$DIR/merged.json" --slurpfile labels "$KNOWN_LABELS" '
           include "labels";
           ($issues[0] | map(.number)) as $open
           | ($issues[0] | map(select(.labels == []) | .number)) as $unlabeled

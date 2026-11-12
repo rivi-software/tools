@@ -92,10 +92,17 @@ const denyInput = (action: Action) => {
   );
 };
 
-/** The script of the action's step that adds labels. */
-const applyStep = (action: Action) => {
+/** The step that gathers what Claude reads, in each action. */
+const GATHER: Record<Action, string> = {
+  describe: "pr",
+  triage: "issue",
+  housekeeping: "backlog",
+};
+
+/** The script of the action's step with this id. */
+const stepScript = (action: Action, id: string) => {
   const lines = actionLines(action);
-  const step = lines.findIndex((line) => /^\s+id: apply$/u.test(line));
+  const step = lines.findIndex((line) => line.trim() === `id: ${id}`);
 
   return blockAfter(lines, step, /^\s+run: \|$/u);
 };
@@ -284,15 +291,22 @@ const ANSWER = [
   "scope:rivi-bot",
 ];
 
-// gh, as far as the steps use it: it records each call, and answers the reads they make.
+// gh, as far as the steps use it: it records each call, and answers the reads they make. The
+// repository's labels come from GH_LABELS; one pull request or issue is open; any other read
+// finds nothing.
 const FAKE_GH = `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const input = args.includes("--input") ? fs.readFileSync(0, "utf-8") : "";
 fs.appendFileSync(process.env.GH_CALLS, JSON.stringify({ args, input }) + "\\n");
 const call = args.join(" ");
-if (call.includes("--paginate") || call.includes("issues?labels=")) process.stdout.write("[]");
-else if (call.includes("--jq .number")) process.stdout.write("900");
+const out = (text) => process.stdout.write(text);
+if (args[0] === "label" && args[1] === "list") out(process.env.GH_LABELS);
+else if (call.includes("--jq .number")) out("900");
+else if (args.includes("--method")) {}
+else if (/^repos\\/[^/]+\\/[^/]+\\/(pulls|issues)\\/\\d+$/.test(args[1] ?? ""))
+  out(JSON.stringify({ state: "open", pull_request: null, base: { sha: "base", ref: "main" } }));
+else out("[]");
 `;
 
 /** An open issue as housekeeping lists it, active today. */
@@ -304,9 +318,8 @@ const openIssue = (number: number, labels: string[]) => ({
   updatedAt: new Date().toISOString().replace(/\.\d+Z$/u, "Z"),
 });
 
-/** What a step reads from its directory, as the action's first step writes it. */
+/** What the step that adds labels reads from its directory, as the gather step writes it. */
 interface Fixtures {
-  "labels.json": Label[];
   "pull-request.json"?: { labels: { name: string }[] };
   "issue.json"?: { labels: { name: string }[] };
   "issues.json"?: ReturnType<typeof openIssue>[];
@@ -318,30 +331,42 @@ interface Fixtures {
 const reportOf = (sent: Call[]) =>
   sent.flatMap(({ args }) => args).find((arg) => arg.startsWith("body=")) ?? "";
 
+/** The labels in a file a step left, by name. */
+const namesIn = (file: string): string[] =>
+  JSON.parse(readFileSync(file, "utf-8")).map((label: Label) => label.name);
+
 describe.skipIf(!hasTools)("the steps that add labels", () => {
   const work = mkdtempSync(path.join(tmpdir(), "rivi-bot-labels-"));
 
   afterAll(() => rmSync(work, { recursive: true, force: true }));
 
-  /** Runs the action's step as GitHub would, and returns what gh was asked to send. */
+  /**
+   * Runs the action's step with this id as GitHub would, in a runner's temporary directory of its
+   * own, and returns what gh was asked to send. The directory starts as the gather step leaves it.
+   */
   const runStep = (
     action: Action,
+    id: string,
     files: Fixtures,
     env: Record<string, string>
   ) => {
-    const dir = mkdtempSync(path.join(work, `${action}-`));
-    const bin = path.join(dir, "bin");
+    const temp = mkdtempSync(path.join(work, `${action}-`));
+    const dir = path.join(temp, "rivi-bot");
+    const known = path.join(temp, "rivi-bot-labels.json");
+    const bin = path.join(temp, "bin");
+    mkdirSync(dir);
     mkdirSync(bin);
     writeFileSync(path.join(bin, "gh"), FAKE_GH);
     chmodSync(path.join(bin, "gh"), 0o755);
+    writeFileSync(known, JSON.stringify(LABELS));
 
     for (const [name, content] of Object.entries(files)) {
       writeFileSync(path.join(dir, name), JSON.stringify(content));
     }
 
-    const script = path.join(dir, "step.sh");
-    writeFileSync(script, applyStep(action));
-    const calls = path.join(dir, "calls.jsonl");
+    const script = path.join(temp, "step.sh");
+    writeFileSync(script, stepScript(action, id));
+    const calls = path.join(temp, "calls.jsonl");
     writeFileSync(calls, "");
 
     const log = execFileSync(
@@ -354,12 +379,15 @@ describe.skipIf(!hasTools)("the steps that add labels", () => {
           ...process.env,
           PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
           GH_CALLS: calls,
+          GH_LABELS: JSON.stringify(LABELS),
           GH_TOKEN: "token",
           GITHUB_REPOSITORY: "rivi-software/example",
           GITHUB_ACTION_PATH: path.join(root, "rivi-bot", action),
-          GITHUB_OUTPUT: path.join(dir, "output"),
-          GITHUB_STEP_SUMMARY: path.join(dir, "summary"),
+          GITHUB_OUTPUT: path.join(temp, "output"),
+          GITHUB_STEP_SUMMARY: path.join(temp, "summary"),
+          RUNNER_TEMP: temp,
           DIR: dir,
+          KNOWN_LABELS: known,
           LABELS_DENY: denyInput(action),
           ...env,
         },
@@ -382,14 +410,41 @@ describe.skipIf(!hasTools)("the steps that add labels", () => {
       })
     );
 
-    return { log, sent, labeled };
+    return {
+      log,
+      sent,
+      labeled,
+      shown: () => namesIn(path.join(dir, "labels.json")),
+      known: () => namesIn(known),
+    };
   };
+
+  it.each(ACTIONS)("%s shows Claude only the labels it may add", (action) => {
+    const { shown, known } = runStep(
+      action,
+      GATHER[action],
+      {},
+      {
+        PR_NUMBER: "12",
+        HEAD_SHA: "0123456789abcdef",
+        ISSUE: "34",
+        DUPLICATES: "true",
+      }
+    );
+
+    expect(shown()).toStrictEqual([
+      "security",
+      "scope:rivi-bot",
+      "documentation",
+    ]);
+    expect(known()).toStrictEqual(LABELS.map(({ name }) => name));
+  });
 
   const housekeeping = (labels: "true" | "false") =>
     runStep(
       "housekeeping",
+      "apply",
       {
-        "labels.json": LABELS,
         "issues.json": [
           openIssue(5, []),
           openIssue(6, []),
@@ -418,10 +473,8 @@ describe.skipIf(!hasTools)("the steps that add labels", () => {
   it("describe adds neither ready-for-agent nor breaking-change", () => {
     const { log, labeled } = runStep(
       "describe",
-      {
-        "labels.json": LABELS,
-        "pull-request.json": { labels: [{ name: "documentation" }] },
-      },
+      "apply",
+      { "pull-request.json": { labels: [{ name: "documentation" }] } },
       {
         PR_NUMBER: "12",
         HEAD_SHA: "0123456789abcdef",
@@ -443,11 +496,8 @@ describe.skipIf(!hasTools)("the steps that add labels", () => {
   it("triage adds neither ready-for-agent nor breaking-change", () => {
     const { labeled } = runStep(
       "triage",
-      {
-        "labels.json": LABELS,
-        "issue.json": { labels: [] },
-        "issues.json": [],
-      },
+      "apply",
+      { "issue.json": { labels: [] }, "issues.json": [] },
       {
         LOGIN: "github-actions[bot]",
         ISSUE: "34",
