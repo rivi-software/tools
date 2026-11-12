@@ -1,5 +1,15 @@
 # @rivi-software/semgrep-github-report
 
+## 0.2.0
+
+### Minor Changes
+
+- f30f753: `--mode pr` now lists the findings of a pull request from a fork in the job summary, as `--mode summary` does, prints a line that says why and exits 0. It tells a fork apart by the event in `GITHUB_EVENT_PATH`: the pull request's head repository is not `GITHUB_REPOSITORY`. It makes no request to GitHub then, since GitHub gives a fork's pull request a read-only `GITHUB_TOKEN` by default. Before, the step failed with a 403 on every pull request from a fork, unless the workflow skipped it with a step condition. Those conditions can go: `if: github.event_name == 'pull_request'` on the step is enough. A 403 on a pull request from the repository itself still fails the step, and now names only the missing `pull-requests: write`. `--mode pr` reads the event with `--pr` too, and fails with the file's name when it cannot.
+
+### Patch Changes
+
+- 23b1cb4: `--mode pr` now updates only a comment that opens with `<!-- semgrep-scan -->` and that `github-actions[bot]` wrote, or the account the new `--author <login>` option names. Any other comment with the marker is left alone, and the command comments anew when none matches. Before, it updated the first comment that held the marker anywhere, so a person's comment that pasted or quoted the report, posted before the report's own, was the one it edited: GitHub refused the edit with a 403 on every run, or, with a token that could edit it, the command overwrote that person's comment. A workflow that runs the command with a GitHub App's or a person's token passes that account's login, such as `--author acme-scanner[bot]`. Without it, such a run adds a comment every time.
+
 ## 0.1.3
 
 ### Patch Changes
