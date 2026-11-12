@@ -85,7 +85,7 @@ You may use AI tools to write an issue or a pull request, and you are its author
 
 A new package starts with an issue, like any change bigger than a fix.
 
-Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app. Start the README with the badge row the other packages have, under its title, and end it with their License section and RIVI Software sign-off, with the package's name in the badges' addresses. Add the package to the table of packages in the root README. A maintainer creates its `scope:<name>` label, with a description of what the package does, and the pull request maps it to the package's directory in [`.github/labeler.yml`](.github/labeler.yml).
+Each package lives in `packages/<name>` and is published as `@rivi-software/<name>`. Name it for what it does and where it runs (`workers-mail`, `vite-plugin-zod-jitless`), not after the app it came from, and write its README for someone who has never seen that app. Start the README with the badge row the other packages have, under its title, and end it with their License section and RIVI Software sign-off, with the package's name in the badges' addresses. Add the package to the table of packages in the root README. A maintainer creates its `scope:<name>` label, with a description of what the package does, and the pull request maps it to the package's directory in [`.github/labeler.yml`](.github/labeler.yml). `pnpm run check:manifests` fails until the README's table and `labeler.yml` both list the package.
 
 ```text
 packages/<name>/
@@ -128,10 +128,10 @@ packages/<name>/
 }
 ```
 
-- A package ships built JavaScript and declarations from `dist/`, nothing else: `exports` lists every entry point, `types` first, and a command line tool is a `bin` in `dist/` whose source starts with `#!/usr/bin/env node`. `pnpm run check:manifests` enforces these fields.
+- A package ships built JavaScript and declarations from `dist/`, nothing else: `exports` lists every entry point, `types` first, and a command line tool is a `bin` in `dist/` whose source starts with `#!/usr/bin/env node`. `pnpm run check:manifests` enforces these fields and checks that the rest of the template is there.
 - `repository.url` stays exactly as written: npm compares it with the repository a trusted publish comes from and refuses one that differs.
 - What a package plugs into (React, Vite, a framework) is a peer dependency, optional when only one entry point needs it, with the version its tests use in `devDependencies`. Runtime dependencies take caret ranges. TypeScript, Vitest, `@types/node`, Oxlint, Oxfmt and Ultracite come from the root.
-- Where a package runs in Node, it supports Node 22, which CI tests beside Node 24 and 26. The types come from `@types/node` 22, so type-checking rejects an API that Node 22 lacks. When Node 22 reaches its end of life on 2027-04-30, the floor moves to 24: `engines`, `@types/node` and the CI matrix together.
+- Where a package runs in Node, it supports Node 22, which CI tests beside Node 24 and 26, and says so in `engines.node`. `check:manifests` asks for it from a package with a `bin`, or one whose row in the root README says it runs in Node. The types come from `@types/node` 22, so type-checking rejects an API that Node 22 lacks. When Node 22 reaches its end of life on 2027-04-30, the floor moves to 24: `engines`, `@types/node` and the CI matrix together.
 
 ### TypeScript
 

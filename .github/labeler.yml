@@ -1,7 +1,8 @@
 # The scope:* label of each path a pull request changes (.github/workflows/pr-labels.yml). The
 # scopes are the Conventional Commit scopes: a package's directory, rivi-bot, and repo for the rest.
 # Issues get theirs from Clef (scripts/label-issue.ts). A new package needs a scope:<directory>
-# label, with a description that says what the package does, and a line here.
+# label, with a description that says what the package does, and a line here: `pnpm run
+# check:manifests` fails without it.
 scope:cloudflare-deploy:
   - changed-files:
       - any-glob-to-any-file: packages/cloudflare-deploy/**
