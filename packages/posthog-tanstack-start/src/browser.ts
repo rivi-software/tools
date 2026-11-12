@@ -52,6 +52,7 @@ export const withPostHog = (fn: (posthog: PostHog) => void) => {
  * of them on an event or a person (`$current_url`, `$pathname`, `$referrer`, `$initial_current_url`, an autocaptured
  * link, the heatmap's keys) leaves as its route pattern. Session replay's `$snapshot` is compressed past reading, so
  * it goes as it is: replay stays off for an app that sets these, or blocks the paths in the project settings.
+ * Throws for a pattern the router would read differently, such as `prefix$id`.
  */
 export const redactSecretPaths = (
   patterns: readonly string[]

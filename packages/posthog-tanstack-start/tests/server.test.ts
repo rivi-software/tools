@@ -131,6 +131,12 @@ describe("the Worker's PostHog client", () => {
       expect(JSON.stringify(sent)).not.toMatch(/k3y/u);
     });
 
+    it("throws at setup for a secret path the router reads differently", () => {
+      expect(() => setSecretPaths(["/files/$/edit"])).toThrow(
+        'Secret path "/files/$/edit" goes on after its splat'
+      );
+    });
+
     it("sends a secret page's address in the exception's message, stack and properties as the route's pattern", async () => {
       const { server, bodies } = await realClient();
       server.setSecretPaths(["/t/$token"]);

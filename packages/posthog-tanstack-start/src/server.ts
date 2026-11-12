@@ -22,6 +22,7 @@ let redactPath: PathRedactor | null = null;
  * The app's routes whose address is a credential (a shared ticket's page `/t/$token`), which everything the Worker
  * sends reports by their pattern: an exception's URL, message and stack, and the properties of every exception and
  * event. Called once from the Worker's entry module, so it holds for every handler and Durable Object.
+ * Throws for a pattern the router would read differently, such as `prefix$id`.
  */
 export const setSecretPaths = (patterns: readonly string[]) => {
   redactPath = patterns.length > 0 ? pathRedactor(patterns) : null;
