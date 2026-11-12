@@ -3,7 +3,7 @@ import path from "node:path";
 
 import ignore from "ignore";
 
-import { posixRelative } from "./source-map.js";
+import { AFTER_SOURCE_MAPPING_URL, posixRelative } from "./source-map.js";
 
 /** A file in the assets directory. */
 export interface AssetFile {
@@ -126,10 +126,16 @@ const SCRIPT_OR_STYLE = /\.(?:[cm]?js|css)$/iu;
 /** A `.map` file, which the assets would serve as the source map it is. */
 const MAP_FILE = /\.map$/iu;
 
-/** The `sourceMappingURL` comment that ends a file and holds the map itself. */
-const INLINE_SOURCE_MAP = /^\/[/*][#@] sourceMappingURL=data:[^\s*]*[\s*/]*$/u;
+/**
+ * The `sourceMappingURL` comment that holds the map itself, which only whitespace and comments
+ * follow.
+ */
+const INLINE_SOURCE_MAP = new RegExp(
+  String.raw`^\/[/*][#@] sourceMappingURL=data:[^\s*]*${AFTER_SOURCE_MAPPING_URL}`,
+  "u"
+);
 
-/** Whether a script or style ends with its source map inline. */
+/** Whether a script or style carries its source map inline. */
 export const hasInlineSourceMap = (code: string): boolean => {
   const at = code.lastIndexOf("sourceMappingURL=data:");
 

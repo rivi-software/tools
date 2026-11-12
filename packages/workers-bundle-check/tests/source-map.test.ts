@@ -133,6 +133,69 @@ describe(readSourceMap, () => {
     await expect(readSourceMap(none, "a();", dir)).resolves.toBeUndefined();
   });
 
+  it("reads the map the file names when other comments follow the name", async () => {
+    const dir = temporaryDirectory();
+    const debugId = "//# debugId=85314830-023f-4cf1-a267-535f4e37bb17";
+    const sourceUrl = "//# sourceURL=app.js";
+
+    // The map is not `<file>.map`, so only the comment that names it finds it.
+    write(dir, {
+      "src/a.ts": "",
+      "dist/maps/app.js.map": JSON.stringify({
+        ...map,
+        sources: ["../../src/a.ts"],
+      }),
+      "dist/named-debug-id.js": `a();\n//# sourceMappingURL=maps/app.js.map\n${debugId}\n`,
+      "dist/named-source-url.js": `a();\n//# sourceMappingURL=maps/app.js.map\n${sourceUrl}\n`,
+      "dist/inline-debug-id.js": `${inline(map)}\n${debugId}`,
+      "dist/inline-source-url.js": `${inline(map)}\n${sourceUrl}\n`,
+    });
+
+    const names = [
+      "named-debug-id",
+      "named-source-url",
+      "inline-debug-id",
+      "inline-source-url",
+    ];
+
+    const modules = await Promise.all(
+      names.map(async (name) => {
+        const file = path.join(dir, "dist", `${name}.js`);
+        const found = await readSourceMap(file, await readText(file), dir);
+
+        return [name, found?.modules] as const;
+      })
+    );
+
+    expect(modules).toStrictEqual(names.map((name) => [name, ["src/a.ts"]]));
+  });
+
+  it("reads no map from a comment that code follows", async () => {
+    const dir = temporaryDirectory();
+    const debugId = "//# debugId=85314830-023f-4cf1-a267-535f4e37bb17";
+
+    write(dir, {
+      "src/a.ts": "",
+      "dist/maps/app.js.map": JSON.stringify({
+        ...map,
+        sources: ["../../src/a.ts"],
+      }),
+      "dist/code-after.js":
+        "a();\n//# sourceMappingURL=maps/app.js.map\nfoo();\n",
+      "dist/code-after-debug-id.js": `a();\n//# sourceMappingURL=maps/app.js.map\n${debugId}\nfoo();\n`,
+    });
+
+    const found = await Promise.all(
+      ["code-after", "code-after-debug-id"].map(async (name) => {
+        const file = path.join(dir, "dist", `${name}.js`);
+
+        return readSourceMap(file, await readText(file), dir);
+      })
+    );
+
+    expect(found).toStrictEqual([undefined, undefined]);
+  });
+
   it("refuses a map it cannot read", async () => {
     const dir = temporaryDirectory();
     write(dir, {
