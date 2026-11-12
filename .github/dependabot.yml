@@ -17,6 +17,8 @@ updates:
         patterns: ["*"]
 
   # A bump of a published package's dependency ranges needs a changeset before it releases.
+  # Dependabot writes none: the Changeset check (.github/workflows/changeset.yml) fails its pull
+  # request until a maintainer pushes one.
   - package-ecosystem: npm
     directory: /
     schedule:

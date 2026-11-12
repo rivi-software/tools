@@ -25,6 +25,7 @@ Each issue has a type, and issues and pull requests have labels in a few familie
 | Topic | `security`, `performance`, `documentation`, `accessibility`, `question`, `breaking-change` | What else it is about. `breaking-change` needs a breaking release, and only a maintainer adds it |
 | Triage | `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `duplicate`, `wontfix` | Where an issue stands. `needs-triage` waits for a maintainer, `needs-info` for its author; `ready-for-agent` is specified well enough for a coding agent, `ready-for-human` needs a person |
 | Contributors | `good first issue`, `help wanted` | Ready for someone outside the team to take |
+| Release | `no-changeset` | On a pull request that changes a package but releases nothing, such as a refactor its users cannot notice: the `Changeset` check passes without a changeset. Only a maintainer adds it |
 
 The `bug` and `enhancement` labels remain on older issues only: the types replace them.
 
@@ -56,6 +57,7 @@ Work on a branch in your fork. One pull request makes one change, to one package
 - Changed behaviour comes with a test (Vitest, in the package's `tests/`). A bug fix comes with a test that fails without the fix.
 - When what a package does or exports changes, its README changes with it.
 - A change to a published package comes with a changeset. Run `pnpm changeset`, pick the package and the bump (`patch` for a fix, `minor` for a feature), and write the line for its changelog, for the people who use the package. Not sure of the bump? Say so in the pull request, and a maintainer settles it. A change only to tests, CI or the repository's own docs needs no changeset.
+- The `Changeset` check fails a pull request that changes a package's `src/`, or the `dependencies`, `peerDependencies` or `exports` in its `package.json`, without a changeset that names the package. `pnpm run check:changeset` runs it on your branch's commits. For a change that releases nothing, a maintainer adds the `no-changeset` label instead, and the check passes.
 - A new runtime dependency ends up in every app that installs the package, so it needs a maintainer's agreement in the issue first. pnpm runs a dependency's install script only when `pnpm-workspace.yaml` allows it, and takes no dependency from a git or tarball URL.
 - `pnpm run verify` passes before you open the pull request.
 
@@ -161,6 +163,7 @@ The other workflows run on GitHub Actions, from `.github/workflows/`, because De
 
 - [`release.yml`](.github/workflows/release.yml) publishes to npm through trusted publishing, which needs a GitHub-hosted runner's OIDC token: Depot CI's come from Depot. It copies to GitHub Packages with the job's `GITHUB_TOKEN`, and GitHub Packages takes no GitHub App token, which is what Depot CI's `GITHUB_TOKEN` is.
 - [`review.yml`](.github/workflows/review.yml) (with [`rivi-bot.yml`](.github/workflows/rivi-bot.yml)) and [`pr-labels.yml`](.github/workflows/pr-labels.yml) run on pull requests from forks too, which Depot CI does not run yet.
+- [`changeset.yml`](.github/workflows/changeset.yml) runs [`scripts/check-changeset.ts`](scripts/check-changeset.ts) on every pull request, from forks too, and again when a label is added or removed, since `no-changeset` waives it. Its `Changeset` check is advisory: the ruleset requires only `CI / verify`, so a maintainer can push a missing changeset before merging.
 - [`issue-labels.yml`](.github/workflows/issue-labels.yml) and [`oss-project.yml`](.github/workflows/oss-project.yml) run when an issue opens, an event Depot CI does not take.
 - [`rivi-bot-bun.yml`](.github/workflows/rivi-bot-bun.yml) checks the Bun that rivi-bot's actions install on GitHub's runners, where those actions run in every repository that calls them. It runs only when a pull request or a push changes `rivi-bot/`.
 

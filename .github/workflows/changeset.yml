@@ -1,0 +1,43 @@
+name: Changeset
+
+# Fails a pull request that changes what a package publishes without a changeset that names the
+# package, unless it has the no-changeset label (scripts/check-changeset.ts). It is advisory: the
+# main ruleset requires only `CI / verify`, so a maintainer can push the missing changeset before
+# merging. It runs on GitHub Actions because Depot CI does not run pull requests from forks yet,
+# and runs again when a label is added or removed, since the label waives it. It runs the pull
+# request's own script, so it takes pull_request, with a read-only token and no secrets.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+concurrency:
+  group: changeset-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changeset:
+    name: Changeset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # GitHub's merge of the pull request into its base, and the base before it: their difference
+      # is what the pull request changes.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      # Node strips the script's types; it needs nothing installed.
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Check for a changeset
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/check-changeset.ts HEAD^1 HEAD
