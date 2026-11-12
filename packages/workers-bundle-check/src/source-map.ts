@@ -200,9 +200,19 @@ export const modulePath = (
   );
 };
 
-/** The `sourceMappingURL` comment at the end of a built file. */
-const SOURCE_MAPPING_URL =
-  /\/[/*][#@] sourceMappingURL=(?<url>[^\s'"*]+)[\s*/]*$/u;
+/**
+ * What may follow a file's `sourceMappingURL` comment to the end of the file: whitespace, the end
+ * of the comment, and other comments, such as the `//# debugId=` and `//# sourceURL=` a bundler
+ * writes after it. A line comment runs to the end of its line, so that the pattern matches each
+ * comment one way only.
+ */
+export const AFTER_SOURCE_MAPPING_URL = String.raw`(?:\s|\*\/|\/\/[^\n\r  ]*(?![^\n\r  ])|\/\*(?:[^*]|\*(?!\/))*\*\/)*$`;
+
+/** The `sourceMappingURL` comment of a built file, which only whitespace and comments follow. */
+const SOURCE_MAPPING_URL = new RegExp(
+  String.raw`^\/[/*][#@] sourceMappingURL=(?<url>[^\s'"*]+)${AFTER_SOURCE_MAPPING_URL}`,
+  "u"
+);
 
 /**
  * The source map of a built file: the one its `sourceMappingURL` names, inline or in a file, or
