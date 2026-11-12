@@ -35,6 +35,7 @@ import { AI_LIMITS, workersAiMessage } from "./workers-ai.ts";
 import type {
   AiLimits,
   ChatMessage,
+  ModelMessage,
   ToolCall,
   ToolDefinition,
 } from "./workers-ai.ts";
@@ -634,7 +635,23 @@ const runToolCalls = async (
   return submitted;
 };
 
-/** The model's review: its rounds with the tools, then, when it has not submitted, one last call to. */
+/** What the model's last answer did instead of submitting, for the error that says it never did. */
+const insteadOfSubmitting = (message: ModelMessage): string => {
+  const called = message.tool_calls?.map((c) => c.function.name) ?? [];
+
+  if (called.length) {
+    return `Its last answer called ${called.join(", ")}.`;
+  }
+
+  return message.content?.trim()
+    ? `Its last answer was words: ${clip(message.content.trim(), 300)}`
+    : "Its last answer was empty.";
+};
+
+/**
+ * The model's review: its rounds with the tools, then, when it has not submitted, one last call
+ * that offers submit_review alone and requires a tool call, so it cannot answer in words.
+ */
 const reviewWithModel = async (reviewer: Reviewer): Promise<Submission> => {
   const { env, fetchImpl, messages, model, tools, limits, rounds } = reviewer;
   const definitions = [...tools.definitions, READ_DIFF, SUBMIT];
@@ -691,7 +708,9 @@ const reviewWithModel = async (reviewer: Reviewer): Promise<Submission> => {
         },
       ],
       model,
-      tool_choice: "auto",
+      // With "auto", a model deep in a long review may answer in words; submit_review is the only
+      // tool here, so a required call is that one.
+      tool_choice: "required",
       tools: [SUBMIT],
     },
     limits()
@@ -703,7 +722,7 @@ const reviewWithModel = async (reviewer: Reviewer): Promise<Submission> => {
 
   if (!call) {
     throw new Error(
-      `Workers AI ${model} submitted no review in ${rounds} rounds.`
+      `Workers AI ${model} submitted no review in ${rounds} rounds. ${insteadOfSubmitting(last)}`
     );
   }
 
