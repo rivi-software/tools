@@ -327,7 +327,7 @@ describe(main, () => {
 
         expect(requests).toHaveLength(0);
         expect(output).toBe(
-          "Pull request #7 comes from a fork, whose workflows GitHub gives a read-only token: listing its findings in the job summary instead of a comment.\n" +
+          "Pull request #7 comes from a fork: listing its findings in the job summary instead of a comment.\n" +
             "Listed 1 finding(s) in the job summary."
         );
         expect(readFileSync(summary, "utf-8")).toBe(
@@ -390,6 +390,19 @@ describe(main, () => {
       await expect(
         main(args, { ...pullRequestEnv(), GITHUB_TOKEN: undefined })
       ).rejects.toThrow("Missing required environment variable: GITHUB_TOKEN");
+    });
+
+    it("names the event file it cannot read, with --pr too", async () => {
+      stubGitHub();
+      const missing = path.join(dir, "missing-event.json");
+      await expect(
+        main(["--mode", "pr", "--pr", "7", "--findings", findingsFile()], {
+          ...pullRequestEnv(),
+          GITHUB_EVENT_PATH: missing,
+        })
+      ).rejects.toThrow(
+        `Cannot read the workflow event from ${missing} (GITHUB_EVENT_PATH): ENOENT`
+      );
     });
   });
 

@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@rivi-software/semgrep-github-report?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/semgrep-github-report) [![CI status](https://img.shields.io/github/check-runs/rivi-software/tools/main?nameFilter=CI%20%2F%20verify&label=CI)](https://github.com/rivi-software/tools/commits/main) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
 
-Reports [Semgrep](https://semgrep.dev) findings on GitHub with nothing but the job's `GITHUB_TOKEN`. On a pull request it keeps one comment up to date: it comments when findings first appear, edits that comment on every later run, and says so there once they are gone. On a full scan it lists the findings in the job summary. It needs no Semgrep account or `SEMGREP_APP_TOKEN`, files no issues, and does not fail a check over findings.
+Reports [Semgrep](https://semgrep.dev) findings on GitHub with nothing but the job's `GITHUB_TOKEN`. On a pull request from the repository itself it keeps one comment up to date: it comments when findings first appear, edits that comment on every later run, and says so there once they are gone. On a pull request from a fork, which GitHub gives a read-only token by default, and on a full scan, it lists the findings in the job summary. It needs no Semgrep account or `SEMGREP_APP_TOKEN`, files no issues, and does not fail a check over findings.
 
 `semgrep scan --json` leaves its findings in a file few people open, and Semgrep's own pull request comments come with its AppSec Platform, which needs an account and a token. This command turns the open-source CLI's JSON into the comment and the summary.
 
@@ -120,7 +120,7 @@ A finding's path and message can hold text from the scanned code, which the pull
 
 `--mode summary` appends the same table, under a heading with the commit and the number of findings, to the file in `GITHUB_STEP_SUMMARY`; where that is not set, it prints it.
 
-It prints what it did, such as the comment's URL. When it cannot do it (bad options, findings it cannot read, a request GitHub refuses or never answers), it prints why and exits 1. It calls the API at `GITHUB_API_URL`, so it works on GitHub Enterprise Server too.
+It prints what it did, such as the comment's URL. When it cannot do it (bad options, findings or a workflow event it cannot read, a request GitHub refuses or never answers), it prints why and exits 1. It calls the API at `GITHUB_API_URL`, so it works on GitHub Enterprise Server too.
 
 On a `pull_request` event, `GITHUB_SHA` is the merge commit of the pull request into its base, the commit `actions/checkout` checks out by default, so the links show the lines Semgrep scanned. If you check out the head commit instead (`ref: ${{ github.event.pull_request.head.sha }}`), pass that SHA with `--sha` too: a step cannot set `GITHUB_SHA` itself, as GitHub ignores a step's `env` for its default `GITHUB_*` variables.
 
@@ -136,7 +136,7 @@ On a `pull_request` event, `GITHUB_SHA` is the merge commit of the pull request 
 
 | Environment | |
 | --- | --- |
-| `GITHUB_TOKEN` | For `--mode pr`: a token that may write pull request comments, in GitHub Actions `${{ github.token }}` with `pull-requests: write` |
+| `GITHUB_TOKEN` | For `--mode pr` on a pull request from the repository itself: a token that may write pull request comments, in GitHub Actions `${{ github.token }}` with `pull-requests: write` |
 | `GITHUB_REPOSITORY` | `owner/repo` |
 | `GITHUB_SHA`, `GITHUB_EVENT_PATH` | The defaults of `--sha` and `--pr`. The event also says whether the pull request comes from a fork |
 | `GITHUB_STEP_SUMMARY` | The job summary file that `--mode summary`, and `--mode pr` on a pull request from a fork, append to |

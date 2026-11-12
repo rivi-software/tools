@@ -127,21 +127,33 @@ interface WorkflowEvent {
   };
 }
 
-/** The event in `GITHUB_EVENT_PATH`, or an empty one outside GitHub Actions. */
+/**
+ * The event in `GITHUB_EVENT_PATH`, or an empty one outside GitHub Actions. `--mode pr` reads it
+ * with `--pr` too, since a pull request from a fork gets the job summary whoever names it.
+ */
 const readEvent = (env: Env): WorkflowEvent => {
-  if (!env.GITHUB_EVENT_PATH) {
+  const path = env.GITHUB_EVENT_PATH;
+
+  if (!path) {
     return {};
   }
 
-  // SAFETY: GitHub Actions writes the event as JSON, and each read of it checks what it finds.
-  return JSON.parse(
-    readFileSync(env.GITHUB_EVENT_PATH, "utf-8")
-  ) as WorkflowEvent;
+  try {
+    // SAFETY: GitHub Actions writes the event as JSON, and each read of it checks what it finds.
+    return JSON.parse(readFileSync(path, "utf-8")) as WorkflowEvent;
+  } catch (error) {
+    // SAFETY: readFileSync and JSON.parse each throw an Error.
+    throw new Error(
+      `Cannot read the workflow event from ${path} (GITHUB_EVENT_PATH): ${(error as Error).message}`,
+      { cause: error }
+    );
+  }
 };
 
 /**
- * Whether the event is a pull request from another repository, or from a fork since deleted.
- * GitHub gives the workflows such a pull request starts a read-only `GITHUB_TOKEN`.
+ * Whether the event is a pull request from another repository, or from a fork since deleted. By
+ * default, GitHub gives the `pull_request` workflows such a pull request starts a read-only
+ * `GITHUB_TOKEN`.
  */
 const comesFromFork = (event: WorkflowEvent, repo: string): boolean => {
   const head = event.pull_request?.head;
@@ -281,7 +293,7 @@ export const main = async (argv: string[], env: Env): Promise<string> => {
   const prNumber = pullRequestNumber(options.pr, event);
 
   if (comesFromFork(event, repo)) {
-    const why = `Pull request #${prNumber} comes from a fork, whose workflows GitHub gives a read-only token: listing its findings in the job summary instead of a comment.`;
+    const why = `Pull request #${prNumber} comes from a fork: listing its findings in the job summary instead of a comment.`;
 
     return `${why}\n${listInSummary(findings, revision, env)}`;
   }
