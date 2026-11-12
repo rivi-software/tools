@@ -165,7 +165,9 @@ The other workflows run on GitHub Actions, from `.github/workflows/`, because De
 - [`review.yml`](.github/workflows/review.yml) (with [`rivi-bot.yml`](.github/workflows/rivi-bot.yml)) and [`pr-labels.yml`](.github/workflows/pr-labels.yml) run on pull requests from forks too, which Depot CI does not run yet.
 - [`changeset.yml`](.github/workflows/changeset.yml) runs [`scripts/check-changeset.ts`](scripts/check-changeset.ts) on every pull request, from forks too, and again when a label is added or removed, since `no-changeset` waives it. Its `Changeset` check is advisory: the ruleset requires only `CI / verify`, so a maintainer can push a missing changeset before merging.
 - [`issue-labels.yml`](.github/workflows/issue-labels.yml) and [`oss-project.yml`](.github/workflows/oss-project.yml) run when an issue opens, an event Depot CI does not take.
-- [`rivi-bot-bun.yml`](.github/workflows/rivi-bot-bun.yml) checks the Bun that rivi-bot's actions install on GitHub's runners, where those actions run in every repository that calls them. It runs only when a pull request or a push changes `rivi-bot/`.
+- [`rivi-bot-actions.yml`](.github/workflows/rivi-bot-actions.yml) checks rivi-bot's actions on GitHub's runners, where they run in every repository that calls them, since nothing here runs them before they merge. `rivi-bot's Bun on <runner>` checks the Bun they install. `rivi-bot's action inputs` checks that each action they pin still declares every input they set: GitHub only warns on one it does not. It runs only when a pull request or a push changes `rivi-bot/`, so the ruleset does not require its checks: a required check that never runs would hold up every pull request that leaves `rivi-bot/` alone. The maintainer who merges a pull request that changes `rivi-bot/` waits for all three checks to pass instead.
+  - On Dependabot's pull request that moves `claude-code-action` to a commit that pins another Bun, the Bun checks fail. Push the version and integrities that [`rivi-bot/install-bun.sh`](rivi-bot/install-bun.sh) asks for to Dependabot's branch, then merge. Dependabot stops rebasing a branch once someone else pushes to it, and `@dependabot recreate` drops that commit. The Bun checks also fail while rivi-bot's actions pin different commits of `claude-code-action`, so a change by hand moves all of them in one pull request, as Dependabot's does.
+  - When the inputs check fails, the action renamed or dropped an input that the step it names sets. Move the step to what the action's release notes say replaces it.
 
 #### A pull request without CI checks
 
@@ -189,7 +191,7 @@ A pull request from a branch here that shows no `CI /` checks at all, `CI / veri
 ### Pull requests from forks
 
 - **Secrets.** No workflow runs a fork's code with secrets. A workflow on `pull_request_target` has them, so it must not check out the pull request and run it; [rivi-bot's](.github/workflows/rivi-bot.yml) never runs the code it checks out, and [the labeler](.github/workflows/pr-labels.yml) checks out nothing.
-- **GitHub Actions runs.** A fork's pull request that changes `rivi-bot/` runs `rivi-bot-bun.yml`, its own version of it. Read the diff before you approve the run for a first-time contributor.
+- **GitHub Actions runs.** A fork's pull request that changes `rivi-bot/` runs `rivi-bot-actions.yml`, its own version of it. Read the diff before you approve the run for a first-time contributor.
 - **Small fixes.** When a pull request lacks only a changeset or a Conventional Commits title, push the changeset to the branch or edit the title yourself. Don't send the contributor round again.
 
 #### Recreating a pull request from a fork
@@ -298,7 +300,7 @@ GitHub enforces the repository's rulesets; [`.github/rulesets/`](.github/ruleset
 
 - **`main.json`.** `main` changes only through pull requests, squashed, once the `CI / verify` check from the Depot Code Access app passes and the code owner approves. `CI / verify` is the job in [`.depot/workflows/ci.yml`](.depot/workflows/ci.yml) that passes when the checks and every Node version passed. Nobody pushes to `main` directly, force-pushes or deletes it.
   - [`.github/CODEOWNERS`](.github/CODEOWNERS) makes `rikvisser-dev` the owner of every file, so every pull request needs their approval. A review by anyone else, rivi-bot's included, is advice.
-  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `CI / verify` included, so wait for `CI / verify` first.
+  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `CI / verify` included, so wait for `CI / verify` first, and for the checks of rivi-bot's actions on a pull request that changes `rivi-bot/` ([CI](#ci)).
   - A branch need not be up to date with `main` before it merges. Without a merge queue, that would rerun CI on every open pull request after each merge.
 - **`release-tags.json`.** A release tag (`@rivi-software/<name>@<version>`, `rivi-bot-v*`) is created once and is never moved or deleted, because users pin to it.
 

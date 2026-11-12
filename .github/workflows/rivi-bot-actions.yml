@@ -1,0 +1,127 @@
+name: rivi-bot's actions
+
+# rivi-bot's actions run on GitHub's runners in every repository that calls them, and run nowhere
+# here before they merge: the reusable workflow calls them at main. This checks what a bump of the
+# actions they pin, such as Dependabot's, can break, so it runs on GitHub's runners, not Depot CI.
+# Only a change to rivi-bot/ can change the result, so it runs on those alone.
+#
+# - Bun. rivi-bot/install-bun.sh gives claude-code-action a Bun from the npm registry, pinned by
+#   version and integrity. This installs it on both runner architectures, and fails when it is not
+#   the Bun the actions' claude-code-action pins, as after Dependabot moves that action.
+# - Inputs. Each input a step sets is one the action at its pinned commit declares. GitHub only
+#   warns on an input an action does not declare, and the action then runs without it: without
+#   path_to_bun_executable, claude-code-action downloads Bun from GitHub again.
+on:
+  pull_request:
+    paths:
+      - rivi-bot/**
+      - .github/workflows/rivi-bot-actions.yml
+  push:
+    branches:
+      - main
+    paths:
+      - rivi-bot/**
+      - .github/workflows/rivi-bot-actions.yml
+
+concurrency:
+  group: rivi-bot-actions-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  bun:
+    name: rivi-bot's Bun on ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Bun
+        id: bun
+        run: bash rivi-bot/install-bun.sh
+
+      - name: Match claude-code-action's Bun
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUN_PATH: ${{ steps.bun.outputs.path }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BUN_PATH" ]; then
+            echo "::error::install-bun.sh installed no Bun; its warning above says why."
+            exit 1
+          fi
+          refs=$(grep -rhoE 'anthropics/claude-code-action@[0-9a-f]{40}' rivi-bot | sort -u)
+          if [ "$(wc -l <<< "$refs")" != 1 ]; then
+            echo "::error::The rivi-bot actions use different commits of claude-code-action: $(paste -sd " " - <<< "$refs"). Move every rivi-bot/**/action.yml to the same commit, in this pull request."
+            exit 1
+          fi
+          pinned=$(gh api -H Accept:application/vnd.github.raw "repos/anthropics/claude-code-action/contents/action.yml?ref=${refs#*@}" \
+            | yq '.runs.steps[] | select(.id == "setup-bun") | .with["bun-version"]')
+          installed=$("$BUN_PATH" --version)
+          echo "claude-code-action pins Bun $pinned; install-bun.sh installed $installed."
+          if [ "$installed" != "$pinned" ]; then
+            echo "::error::Move the version and integrities in rivi-bot/install-bun.sh to Bun $pinned."
+            exit 1
+          fi
+
+  inputs:
+    name: rivi-bot's action inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Match each action's inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # One line per input that a step sets on an action pinned to a commit:
+          # "<file> <owner/repo[/path]@sha> <input>".
+          uses=$(find rivi-bot -name action.yml -print0 \
+            | xargs -0 yq -N '.runs.steps[] | select(.uses and .with) | filename + " " + .uses + " " + (.with | keys)[]' \
+            | { grep -E '^[^ ]+ [^./][^ @]*@[0-9a-f]{40} [^ ]+$' || true; } | sort -u)
+          if [ -z "$uses" ]; then
+            echo "::error::Read no input that rivi-bot's actions set on a pinned action: this step no longer parses them."
+            exit 1
+          fi
+          failed=0
+          read -ra refs <<< "$(cut -d" " -f2 <<< "$uses" | sort -u | tr "\n" " ")"
+          for ref in "${refs[@]}"; do
+            action=${ref%@*}
+            repo=$(cut -d/ -f1-2 <<< "$action")
+            dir=$(cut -s -d/ -f3- <<< "$action")
+            manifest=""
+            for name in action.yml action.yaml; do
+              if manifest=$(gh api -H Accept:application/vnd.github.raw "repos/$repo/contents/${dir:+$dir/}$name?ref=${ref#*@}" 2>/dev/null); then
+                break
+              fi
+              manifest=""
+            done
+            if [ -z "$manifest" ]; then
+              echo "::error::Found no action.yml for $ref."
+              failed=1
+              continue
+            fi
+            declared=$(yq '.inputs // {} | keys | .[]' <<< "$manifest")
+            while read -r file _ input; do
+              if ! grep -qxF "$input" <<< "$declared"; then
+                echo "::error file=$file::$action at ${ref#*@} declares no input \`$input\`, which $file sets."
+                failed=1
+              fi
+            done < <(awk -v ref="$ref" '$2 == ref' <<< "$uses")
+            echo "Checked the inputs rivi-bot's actions set on $action at ${ref#*@}."
+          done
+          exit "$failed"
