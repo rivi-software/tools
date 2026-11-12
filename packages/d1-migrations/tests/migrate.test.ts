@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { D1MigrationError, migrateD1 } from "../src/index.js";
 import type { D1DatabaseLike } from "../src/index.js";
@@ -21,14 +21,12 @@ const INDEX = {
 
 const MIGRATIONS = [INIT, SEED, INDEX];
 
-type Opened = Awaited<ReturnType<typeof openDatabase>>;
-
-let opened: Opened;
+type Database = Awaited<ReturnType<typeof openDatabase>>["db"];
 
 /** The test's own new database. */
-let db: Opened["db"];
+let db: Database;
 
-const recorded = async (database: Opened["db"], table = "d1_migrations") => {
+const recorded = async (database: Database, table = "d1_migrations") => {
   const { results } = await database
     .prepare(
       `SELECT id, name FROM "${table.replaceAll('"', '""')}" ORDER BY id`
@@ -38,18 +36,22 @@ const recorded = async (database: Opened["db"], table = "d1_migrations") => {
   return results;
 };
 
-describe(migrateD1, () => {
+/**
+ * Starting Miniflare for a database takes a few hundred milliseconds on a laptop and has passed five
+ * seconds on a busy CI runner, the first start most of all. A test's own migrations take about as
+ * long as a start, so the tests get more than Vitest's 5 s default too.
+ */
+describe(migrateD1, { timeout: 30_000 }, () => {
   /**
-   * Starting Miniflare for a database takes a few hundred milliseconds on a laptop and has passed
-   * five seconds on a busy CI runner. In a hook it gets a limit of its own, and each test keeps the
-   * default limit for what it checks.
+   * The start has a limit of its own in the hook. The cleanup it returns runs only after an open
+   * that succeeded, so a failed open reports its own error and nothing else.
    */
   beforeEach(async () => {
-    opened = await openDatabase();
+    const opened = await openDatabase();
     ({ db } = opened);
-  }, 60_000);
 
-  afterEach(() => opened.dispose());
+    return () => opened.dispose();
+  }, 60_000);
 
   it("applies every migration in order to a new database, and records each", async () => {
     await expect(
