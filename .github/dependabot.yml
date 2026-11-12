@@ -3,7 +3,8 @@ updates:
   # The workflows on GitHub Actions, CI's on Depot CI, and each of rivi-bot's composite actions. A
   # directory listed here does not cover the ones below it, so a new action's directory goes here
   # too. One group bumps an action in all of them: every rivi-bot action moves to a new
-  # claude-code-action in one pull request, where rivi-bot-bun.yml checks the Bun it pins.
+  # claude-code-action in one pull request, where rivi-bot-actions.yml checks the Bun it pins and
+  # the inputs it takes.
   - package-ecosystem: github-actions
     directories:
       - /
