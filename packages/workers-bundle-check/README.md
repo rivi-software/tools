@@ -17,7 +17,7 @@ This package checks a build for all three, from the command line or from a scrip
 npm install --save-dev @rivi-software/workers-bundle-check
 ```
 
-It needs Node 22 or later, and runs after the build, not in the Worker. A configuration file in TypeScript needs Node 22.18 or later. The package is ESM only.
+It needs Node 22.2 or later, and runs after the build, not in the Worker. A configuration file in TypeScript needs Node 22.18 or later. The package is ESM only.
 
 It reads the build's output, so it works with any bundler that writes source maps: the Cloudflare Vite plugin, `wrangler deploy --outdir`, or esbuild of your own. The tests build Workers with Vite 8 (Rolldown) and with Wrangler 4.156.2 (esbuild).
 
@@ -164,11 +164,23 @@ The check looks for these key formats in two places:
 | Cloudflare API credential | `cfk_…` (Global API key), `cfut_…` (user API token), `cfat_…` (account API token) |
 | Cloudflare Access service token secret | `cfast_…` |
 
+A `cfut_`, `cfat_` or `cfast_` value ends in a checksum: the CRC32 of the 40 characters after its prefix, in lowercase hexadecimal. A value whose checksum is wrong is not reported. A `cfk_` Global API key is found by its shape alone, because what its checksum covers is not confirmed.
+
 Keys that apps ship to browsers on purpose are not in the list: Stripe's publishable `pk_` keys, PostHog's `phc_` project tokens, Supabase's publishable keys, and Google's `AIza` API keys. Add other formats with `secretPatterns`:
 
 ```ts
-secretPatterns: [{ name: "internal service token", pattern: /\bsvc_[A-Za-z0-9]{32}\b/ }],
+secretPatterns: [
+  { name: "internal service token", pattern: /\bsvc_[A-Za-z0-9]{32}\b/ },
+  // Reported only when its last 4 characters are the checksum of the rest.
+  {
+    name: "license key",
+    pattern: /\blic_[A-Z0-9]{20}[0-9a-f]{4}\b/,
+    verify: (value) => licenseChecksum(value.slice(4, -4)) === value.slice(-4),
+  },
+],
 ```
+
+`verify` is optional. It gets each value the pattern matched, and the check reports the value only when `verify` returns `true`, such as when its checksum holds. A wrong `verify` hides a real secret, so give one only for a format whose checksum you know.
 
 The report never prints a value. It gives the file, the line, the module the value comes from when the file has a source map, and a fingerprint: the first 16 hexadecimal digits of the value's SHA-256. The fingerprint stays the same from build to build, while the names of hashed chunks change.
 
@@ -210,7 +222,7 @@ From `@rivi-software/workers-bundle-check`:
 | --- | --- |
 | `checkWorkerBundle(options)` | Checks the build: resolves to a `WorkerBundleReport`, or rejects with a `WorkerBundleCheckError` |
 | `WorkerBundleCheckError` | The problems: `report`, with `report.problems`; its message lists them |
-| `SECRET_PATTERNS` | The built-in secret patterns: `{ name, pattern }[]` |
+| `SECRET_PATTERNS` | The built-in secret patterns: `{ name, pattern, verify? }[]` |
 | Types | `WorkerBundleCheckOptions`, `WorkerBundleReport`, `WorkerBundleProblem`, `ForbiddenRule`, `ModulePattern`, `AllowedSecret`, `SecretPattern`, `BundledModule` |
 
 A `WorkerBundleReport` holds `serverDir`, `workerFiles`, `modules` (how many the maps name), `assetsDir`, `servedAssets`, `ignoredAssets`, `allowedSecrets` (how many findings the allow-list let through) and `problems`. Each problem has a `kind` and a one-line `message`:
