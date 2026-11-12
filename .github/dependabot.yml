@@ -1,7 +1,10 @@
 version: 2
 updates:
+  # The workflows on GitHub Actions, and CI's on Depot CI. One group bumps an action in both.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.depot/workflows
     schedule:
       interval: weekly
     cooldown:
