@@ -4,11 +4,12 @@ name: rivi-bot release
 # rivi-bot-v<major>.<minor>.<patch> tag on a commit of main, not published yet. A maintainer runs it
 # by hand from main once a change to rivi-bot/ or .github/workflows/rivi-bot.yml has merged that
 # callers who pin should get. scripts/release-rivi-bot.ts checks that the commit is on main, comes
-# after the last release and changes rivi-bot, and that CI passed on it. The version follows the
-# last tag and the Conventional Commits titles since it, unless the run names the part to raise. The
-# draft's notes list those commits; the maintainer rewrites them for the people who run rivi-bot
-# and publishes the release, which creates the tag. A tag is never moved or deleted
-# (.github/rulesets/release-tags.json), so nothing is tagged before someone has read the notes.
+# after the last release and changes rivi-bot, and that Depot CI's CI / verify check passed on it,
+# the check main's ruleset requires. The version follows the last tag and the Conventional Commits
+# titles since it, unless the run names the part to raise. The draft's notes list those commits;
+# the maintainer rewrites them for the people who run rivi-bot and publishes the release, which
+# creates the tag. A tag is never moved or deleted (.github/rulesets/release-tags.json), so nothing
+# is tagged before someone has read the notes.
 on:
   workflow_dispatch:
     inputs:
@@ -35,7 +36,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      actions: read # CI's run on the commit
+      checks: read # CI / verify on the commit, which Depot CI reports as a check run
       contents: write # the draft release
     steps:
       # Every commit and tag: the version follows the last rivi-bot-v* tag, and the notes list the

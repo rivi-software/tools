@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   bumpFor,
   bumpForAll,
+  CI_CHECK,
   latestTag,
   MAIN,
   nextVersion,
@@ -11,7 +15,7 @@ import {
   releaseNotes,
   tagFor,
 } from "./rivi-bot-release.ts";
-import type { CiRun, Draft, ReleaseSource } from "./rivi-bot-release.ts";
+import type { CheckRun, Draft, ReleaseSource } from "./rivi-bot-release.ts";
 
 const SHA = "5267ecd0a1b2c3d4e5f60718293a4b5c6d7e8f90";
 
@@ -184,11 +188,20 @@ const sha = (place: number) => place.toString(16).repeat(40);
 /** A commit that exists in the clone but is not on main. */
 const OFF_MAIN = "f".repeat(40);
 
-const PASSED: CiRun = {
-  url: "https://github.com/rivi-software/tools/actions/runs/1",
+/** A CI job's check that passed, as Depot CI reports one. */
+const passed = (name: string): CheckRun => ({
+  name,
   status: "completed",
   conclusion: "success",
-};
+  url: `https://github.com/rivi-software/tools/runs/${name.length}`,
+});
+
+/** Every job of a CI run that passed, `CI / verify` last, as it finishes last. */
+const PASSED_CI = [
+  passed("CI / Checks"),
+  passed("CI / Test on Node 22"),
+  passed(CI_CHECK.name),
+];
 
 /** Main's commits, oldest first. The first is rivi-bot-v1.0.0's unless a test tags others. */
 const HISTORY = [
@@ -209,12 +222,12 @@ const HISTORY = [
 const fakeSource = ({
   history = HISTORY,
   tags = { "rivi-bot-v1.0.0": 1 },
-  ciRuns = [PASSED],
+  checks = PASSED_CI,
   drafts = [],
 }: {
   history?: { subject: string; rivibot?: boolean }[];
   tags?: Record<string, number>;
-  ciRuns?: CiRun[];
+  checks?: CheckRun[];
   drafts?: Draft[];
 } = {}) => {
   const asked: string[] = [];
@@ -253,10 +266,10 @@ const fakeSource = ({
         )
         .map(({ sha: full, subject }) => ({ sha: full, subject }))
         .toReversed(),
-    ciRun: () => {
+    ciChecks: () => {
       asked.push("ci");
 
-      return Promise.resolve(ciRuns.at(0));
+      return Promise.resolve(checks);
     },
     waitingDraft: () => {
       asked.push("draft");
@@ -282,7 +295,7 @@ describe(planRelease, () => {
       bump: "minor",
       requested: "auto",
       warnings: [],
-      ci: PASSED.url,
+      ci: passed(CI_CHECK.name).url,
     });
     expect(plan.commits.map(({ subject }) => subject)).toStrictEqual([
       "feat(rivi-bot): fail the review check (#4)",
@@ -414,24 +427,74 @@ describe(planRelease, () => {
     );
   });
 
-  it("waits for CI to pass on the commit", async () => {
+  it("waits for CI / verify to pass on the commit", async () => {
+    const [checks, test, verify] = PASSED_CI;
+
     await expect(
-      planRelease(AUTO, fakeSource({ ciRuns: [] }).source)
-    ).rejects.toThrow(`CI has not run on ${sha(4)} as a push to main.`);
+      planRelease(AUTO, fakeSource({ checks: [] }).source)
+    ).rejects.toThrow(
+      `CI has not run on ${sha(4)}: it has no CI / verify check.`
+    );
     await expect(
       planRelease(
         AUTO,
         fakeSource({
-          ciRuns: [{ ...PASSED, status: "in_progress", conclusion: null }],
+          checks: [
+            checks,
+            { ...test, status: "in_progress", conclusion: null },
+            { ...verify, status: "queued", conclusion: null },
+          ],
         }).source
       )
-    ).rejects.toThrow(`CI is still running on ${sha(4)}`);
+    ).rejects.toThrow(`CI is still running on ${sha(4)}: ${verify.url}.`);
     await expect(
       planRelease(
         AUTO,
-        fakeSource({ ciRuns: [{ ...PASSED, conclusion: "cancelled" }] }).source
+        fakeSource({
+          checks: [checks, test, { ...verify, conclusion: "failure" }],
+        }).source
       )
-    ).rejects.toThrow(`CI ended as cancelled on ${sha(4)}`);
+    ).rejects.toThrow(`CI / verify ended as failure on ${sha(4)}`);
+  });
+
+  it("counts CI as still running while its other jobs report and CI / verify has not yet", async () => {
+    const [checks, test] = PASSED_CI;
+    const running = { ...test, status: "in_progress", conclusion: null };
+
+    await expect(
+      planRelease(AUTO, fakeSource({ checks: [checks, running] }).source)
+    ).rejects.toThrow(
+      `CI is still running on ${sha(4)}, and CI / verify has not reported yet: ${checks.url}.`
+    );
+  });
+
+  it("waits for the check that main's ruleset requires", () => {
+    // SAFETY: the ruleset is GitHub's JSON for a ruleset, as the file says.
+    const ruleset = JSON.parse(
+      readFileSync(
+        path.join(import.meta.dirname, "../.github/rulesets/main.json"),
+        "utf-8"
+      )
+    ) as {
+      rules: {
+        type: string;
+        parameters?: {
+          required_status_checks?: {
+            context: string;
+            integration_id: number;
+          }[];
+        };
+      }[];
+    };
+
+    const required = ruleset.rules.find(
+      ({ type }) => type === "required_status_checks"
+    )?.parameters?.required_status_checks;
+
+    expect(required).toContainEqual({
+      context: CI_CHECK.name,
+      integration_id: CI_CHECK.appId,
+    });
   });
 
   it("refuses while another rivi-bot release waits as a draft", async () => {

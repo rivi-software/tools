@@ -5,7 +5,7 @@
  * makes every check and picks the version; this script gives it git and the GitHub API, and drafts
  * what it returns.
  *
- * Needs GITHUB_TOKEN (contents: write and actions: read), GITHUB_REPOSITORY, a clone with main's
+ * Needs GITHUB_TOKEN (contents: write and checks: read), GITHUB_REPOSITORY, a clone with main's
  * history and tags, and BUMP: `auto` to read the part to raise from the Conventional Commits
  * titles, or `major`, `minor` or `patch`. COMMIT names a commit other than the head of main.
  *   git fetch origin main --tags
@@ -15,13 +15,19 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
-import { parseTag, planRelease, RIVI_BOT_PATHS } from "./rivi-bot-release.ts";
+import {
+  CI_CHECK,
+  parseTag,
+  planRelease,
+  RIVI_BOT_PATHS,
+} from "./rivi-bot-release.ts";
 import type { ReleasePlan, ReleaseSource } from "./rivi-bot-release.ts";
 
 const { env } = process;
 const dryRun = process.argv.includes("--dry-run");
 
-interface WorkflowRun {
+interface GitHubCheckRun {
+  name: string;
   html_url: string;
   status: string;
   conclusion: string | null;
@@ -88,15 +94,21 @@ const gitStatus = (...args: string[]) => {
 };
 
 const source: ReleaseSource = {
-  // `rev-parse --verify --quiet` prints nothing, and exits 1, for a name that is no commit.
+  // `rev-parse --verify` fails for a name that is no commit, and for a short SHA that more than one
+  // object starts with, which only its message tells apart: more of the SHA settles that one.
   resolve: (commit) => {
     const result = gitStatus(
       "rev-parse",
       "--verify",
-      "--quiet",
       "--end-of-options",
       `${commit}^{commit}`
     );
+
+    if (result.stderr.includes("is ambiguous")) {
+      throw new Error(
+        `More than one object in this clone starts with ${commit}: give more of the SHA.`
+      );
+    }
 
     return result.status === 0 ? result.stdout.trim() : undefined;
   },
@@ -123,23 +135,19 @@ const source: ReleaseSource = {
 
         return { sha, subject: subject.join("\t") };
       }),
-  ciRun: async (sha) => {
-    const { workflow_runs: runs } = await github<{
-      workflow_runs: WorkflowRun[];
-    }>(
+  // CI runs on Depot CI, not GitHub Actions: GitHub knows it only by the checks its app reports.
+  ciChecks: async (sha) => {
+    const { check_runs: runs } = await github<{ check_runs: GitHubCheckRun[] }>(
       "GET",
-      `/actions/workflows/ci.yml/runs?head_sha=${sha}&event=push&per_page=1`
+      `/commits/${sha}/check-runs?app_id=${CI_CHECK.appId}&filter=latest&per_page=100`
     );
 
-    const [run] = runs;
-
-    return (
-      run && {
-        url: run.html_url,
-        status: run.status,
-        conclusion: run.conclusion,
-      }
-    );
+    return runs.map(({ name, status, conclusion, html_url: url }) => ({
+      name,
+      status,
+      conclusion,
+      url,
+    }));
   },
   waitingDraft: async () => {
     for (let page = 1; ; page += 1) {

@@ -164,11 +164,19 @@ export const MAIN = "origin/main";
 
 export type Requested = Bump | "auto";
 
-/** CI's run on a commit, as GitHub reports it. */
-export interface CiRun {
-  url: string;
+/**
+ * The check a release waits for: the one main's ruleset requires (.github/rulesets/main.json),
+ * which Depot CI's `verify` job reports through the Depot Code Access app once every other job
+ * has finished.
+ */
+export const CI_CHECK = { name: "CI / verify", appId: 219_785 } as const;
+
+/** A check run on a commit, as GitHub reports it. */
+export interface CheckRun {
+  name: string;
   status: string;
   conclusion: string | null;
+  url: string;
 }
 
 /** A rivi-bot release that waits as a draft. */
@@ -189,8 +197,8 @@ export interface ReleaseSource {
   tags: () => readonly string[];
   /** The commits after `from`, up to and with `to`, that change RIVI_BOT_PATHS, newest first. */
   commits: (from: string, to: string) => readonly Commit[];
-  /** CI's last run on the commit as a push to main. */
-  ciRun: (sha: string) => Promise<CiRun | undefined>;
+  /** The latest check runs that CI_CHECK's app reported on the commit, one per job. */
+  ciChecks: (sha: string) => Promise<readonly CheckRun[]>;
   waitingDraft: () => Promise<Draft | undefined>;
 }
 
@@ -204,7 +212,7 @@ export interface ReleasePlan {
   requested: Requested;
   notes: string;
   warnings: string[];
-  /** CI's run that passed on the commit. */
+  /** CI_CHECK's run that passed on the commit. */
   ci: string;
 }
 
@@ -248,25 +256,36 @@ const checkInput = ({ bump, commit, ref }: ReleaseInput) => {
   return { requested: bump, commit: name };
 };
 
-/** The URL of CI's run on the commit, once it has passed. */
-const checkCi = (run: CiRun | undefined, sha: string): string => {
-  if (!run) {
-    throw new Error(`CI has not run on ${sha} as a push to main.`);
-  }
+/**
+ * The URL of CI_CHECK's run on the commit, once it has passed. CI reports it only after its other
+ * jobs finish, so a commit with their checks and not this one is still running.
+ */
+const checkCi = (checks: readonly CheckRun[], sha: string): string => {
+  const verify = checks.find(({ name }) => name === CI_CHECK.name);
 
-  if (run.status !== "completed") {
+  if (!verify) {
+    const [running] = checks;
+
     throw new Error(
-      `CI is still running on ${sha}: ${run.url}. Run this again once it passes.`
+      running
+        ? `CI is still running on ${sha}, and ${CI_CHECK.name} has not reported yet: ${running.url}. Run this again once it passes.`
+        : `CI has not run on ${sha}: it has no ${CI_CHECK.name} check.`
     );
   }
 
-  if (run.conclusion !== "success") {
+  if (verify.status !== "completed") {
     throw new Error(
-      `CI ended as ${run.conclusion} on ${sha}: ${run.url}. Re-run it, and run this again once it passes.`
+      `CI is still running on ${sha}: ${verify.url}. Run this again once ${CI_CHECK.name} passes.`
     );
   }
 
-  return run.url;
+  if (verify.conclusion !== "success") {
+    throw new Error(
+      `${CI_CHECK.name} ended as ${verify.conclusion} on ${sha}: ${verify.url}. Re-run CI, and run this again once it passes.`
+    );
+  }
+
+  return verify.url;
 };
 
 /**
@@ -322,7 +341,7 @@ export const planRelease = async (
       ]
     : [];
 
-  const ci = checkCi(await source.ciRun(sha), sha);
+  const ci = checkCi(await source.ciChecks(sha), sha);
   const draft = await source.waitingDraft();
 
   if (draft) {
