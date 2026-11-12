@@ -2,4 +2,4 @@
 "@rivi-software/posthog-tanstack-start": patch
 ---
 
-The Worker now sends an exception with its secret paths (`setSecretPaths`) as their pattern in the error's message and stack and in the properties sent with it, not only in `$current_url` and `$pathname`. Before, an error such as ``new Error(`ticket ${request.url} not found`)`` sent the link to PostHog.
+The Worker now sends its secret paths (`setSecretPaths`) as their pattern everywhere in an event: an exception's message and stack, and the properties of every exception and `captureServerEvent` event, not only an exception's `$current_url` and `$pathname`. Before, an error such as ``new Error(`ticket ${request.url} not found`)`` sent the link to PostHog. An app that sets no secret paths sends its events as before.
