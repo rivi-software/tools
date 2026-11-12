@@ -8,13 +8,13 @@ disable-model-invocation: true
 
 "A rivi-bot release" in `CONTRIBUTING.md` is the procedure: read it first. A release tag is created once and never moved or deleted (`.github/rulesets/release-tags.json`), so every step before the last one is there to get the commit, the version and the notes right.
 
-1. **The commit.** `git fetch origin main --tags`. The target is the head of `origin/main`, unless the user names an earlier commit. Its `verify` check passed:
+1. **The commit.** `git fetch origin main --tags`. The target is the head of `origin/main`, unless the user names an earlier commit. Its `CI / verify` check, from Depot CI's Depot Code Access app, passed:
 
    ```bash
-   gh api repos/rivi-software/tools/commits/<sha>/check-runs --jq '.check_runs[] | "\(.name) \(.status) \(.conclusion)"'
+   gh api repos/rivi-software/tools/commits/<sha>/check-runs --jq '.check_runs[] | select(.name == "CI / verify" and .app.slug == "depot-code-access") | "\(.status) \(.conclusion)"'
    ```
 
-   Still running or failed: stop and tell the user.
+   Missing, still running or failed: stop and tell the user.
 
 2. **What changed.** Run the `git log` from `CONTRIBUTING.md` to list the commits since the last `rivi-bot-v*` tag, then read each one's pull request (`gh pr view <n>`), not only its title. An empty list means there is nothing to release.
 
