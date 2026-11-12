@@ -19,7 +19,7 @@ It needs Node 22 or later and has no dependencies.
 ## Usage
 
 ```text
-semgrep-github-report --mode pr|summary [--findings <file>] [--pr <number>] [--sha <commit>]
+semgrep-github-report --mode pr|summary [--findings <file>] [--pr <number>] [--sha <commit>] [--author <login>]
 ```
 
 `--mode pr` creates or updates the pull request's findings comment; `--mode summary` appends the findings to the job summary, or prints them outside GitHub Actions.
@@ -106,7 +106,7 @@ GITHUB_REPOSITORY=acme/app npx @rivi-software/semgrep-github-report@0 --mode sum
 
 The command reads the `results` of `semgrep scan --json` and links each finding to its line at the scanned commit: `$GITHUB_SERVER_URL/<owner>/<repo>/blob/<sha>/<path>#L<line>`.
 
-`--mode pr` reads the pull request's comments, 100 at a time, for the first that contains `<!-- semgrep-scan -->`, the marker that opens every comment it writes.
+`--mode pr` reads the pull request's comments, 100 at a time, for the first that `github-actions[bot]` wrote and that opens with `<!-- semgrep-scan -->`, the marker that opens every comment the command writes. A run with another token names its account with `--author`. A comment that quotes or pastes the report is someone else's, or holds the marker further in, and the command leaves it alone.
 
 - With findings, it replaces that comment's body, or creates the comment if there is none.
 - Without findings, it replaces an earlier comment's body with "No new findings on this revision.", and comments nothing on a pull request that never had findings.
@@ -129,6 +129,7 @@ On a `pull_request` event, `GITHUB_SHA` is the merge commit of the pull request 
 | `--findings <file>` | `semgrep-findings.json` | What `semgrep scan --json --output <file>` wrote |
 | `--pr <number>` | `pull_request.number` from the event in `GITHUB_EVENT_PATH` | The pull request to comment on, for `--mode pr` |
 | `--sha <commit>` | `GITHUB_SHA` | The commit Semgrep scanned, which the links point at |
+| `--author <login>` | `github-actions[bot]` | The account `GITHUB_TOKEN` comments as, whose comment `--mode pr` updates: `<app-slug>[bot]` for a GitHub App's token, or the login of a person's. Without it, a run with such a token adds a comment every time |
 | `-h`, `--help` | | Prints the usage |
 
 | Environment | |
@@ -165,7 +166,7 @@ const markdown = formatFindingsSummary(findings, { repository: "acme/app", sha: 
 
 ## Limits
 
-- **One comment per pull request.** Every run that reports on a pull request edits the same comment, so two jobs that report different scans on one pull request overwrite each other's findings.
+- **One comment per account.** Every run that reports on a pull request as the same account edits the same comment, so two jobs that report different scans with the same token overwrite each other's findings. Two jobs that comment as different accounts, each named with `--author`, keep a comment each.
 - **Runs at the same time.** Two runs on a pull request without a comment can each create one; the example's `concurrency` group prevents that.
 - **Comment length.** GitHub takes at most 65,536 characters in a comment, roughly 60 findings with registry-length messages. Past that, the comment leaves out the messages, then the table rows that do not fit, and its last line says so; a local `semgrep scan` shows them all.
 - **Job summary size.** GitHub drops a step's summary over 1 MiB, some 4,000 findings, with an error annotation; the step still passes.
@@ -175,7 +176,7 @@ const markdown = formatFindingsSummary(findings, { repository: "acme/app", sha: 
 
 ## Development
 
-The tests in `tests/` cover the formatting (`index.test.ts`), the command against a stand-in for GitHub's API (`main.test.ts`: finding the comment past the first 100, creating and updating it, a fork's 403, the job summary, the options) and the command as Node runs it (`cli.test.ts`). None of them calls GitHub. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+The tests in `tests/` cover the formatting (`index.test.ts`), the command against a stand-in for GitHub's API (`main.test.ts`: finding its own comment past the first 100 and past a person's with the marker, creating and updating it, a fork's 403, the job summary, the options) and the command as Node runs it (`cli.test.ts`). None of them calls GitHub. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
 
 ## License
 
