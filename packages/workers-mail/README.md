@@ -1,6 +1,6 @@
 # @rivi-software/workers-mail
 
-[![npm version](https://img.shields.io/npm/v/@rivi-software/workers-mail?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/workers-mail) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/@rivi-software/workers-mail?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/workers-mail) [![CI status](https://img.shields.io/github/check-runs/rivi-software/tools/main?nameFilter=CI%20%2F%20verify&label=CI)](https://github.com/rivi-software/tools/commits/main) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
 
 Mail from Cloudflare Workers through [Amazon SES](https://aws.amazon.com/ses/) once a Worker holds SES's key, and through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/)'s `send_email` binding until then and whenever SES refuses a message. One call, `sendMail(env, mail)`, picks the transport, formats the addresses and headers for it, and answers with the `Message-ID` the message went out with, so a reply threads back.
 

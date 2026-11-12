@@ -68,9 +68,9 @@ Work on a branch in your fork. One pull request makes one change, to one package
 
 ### What happens next
 
-1. **CI** runs `verify` on Node 22, 24 and 26, and its `verify` check must pass before the pull request can merge. Until a first pull request of yours has merged here, GitHub waits for a maintainer to approve each run before it starts.
+1. **CI** runs `verify` on Node 22, 24 and 26, on [Depot CI](https://depot.dev/docs/ci/overview), and its `CI / verify` check must pass before the pull request can merge. Depot CI does not run pull requests from forks yet. Once a maintainer has read yours, they copy your commits, unchanged, to a branch here and open a pull request from it, where CI runs. Keep pushing to your own pull request, where the conversation stays: the maintainer copies each push over.
 2. **Review.** A maintainer reviews the pull request. They may also ask [rivi-bot](rivi-bot), an automated reviewer that runs on Workers AI, to review it, and it then reviews each later push as well; it only reads the change and comments. Its comments are advice: fix what is right, and reply where it is wrong.
-3. **Merge.** A maintainer squash-merges the pull request once the code owner ([`.github/CODEOWNERS`](.github/CODEOWNERS)) approves it and `verify` passes.
+3. **Merge.** A maintainer squash-merges the pull request, or its copy, once the code owner ([`.github/CODEOWNERS`](.github/CODEOWNERS)) approves it and `CI / verify` passes. A copy's commit on `main` names you as a co-author, and your pull request closes with a link to it.
 4. **Release.** The next release of the package publishes your changeset to npm (see [Changes and releases](#changes-and-releases)).
 
 ### License
@@ -153,11 +153,53 @@ A relative import names the file the build emits, `./util.js` for `src/util.ts`:
 
 ## For maintainers
 
+### CI
+
+CI ([`.depot/workflows/ci.yml`](.depot/workflows/ci.yml)) runs on [Depot CI](https://depot.dev/docs/ci/overview), which reports each job to GitHub as a check from the Depot Code Access app, named `CI / <job>`. `Checks` runs the manifest, format, lint and type checks once; `Test on Node <version>` runs the tests, the build and `check:packages` on Node 22, 24 and 26; `verify` passes when all of them did. `depot ci run --workflow .depot/workflows/ci.yml` runs it on your working tree, unpushed changes included.
+
+The other workflows run on GitHub Actions, from `.github/workflows/`, because Depot CI cannot run them ([its limitations](https://depot.dev/docs/ci/compatibility)):
+
+- [`release.yml`](.github/workflows/release.yml) publishes to npm through trusted publishing, which needs a GitHub-hosted runner's OIDC token: Depot CI's come from Depot. It copies to GitHub Packages with the job's `GITHUB_TOKEN`, and GitHub Packages takes no GitHub App token, which is what Depot CI's `GITHUB_TOKEN` is.
+- [`review.yml`](.github/workflows/review.yml) (with [`rivi-bot.yml`](.github/workflows/rivi-bot.yml)) and [`pr-labels.yml`](.github/workflows/pr-labels.yml) run on pull requests from forks too, which Depot CI does not run yet.
+- [`issue-labels.yml`](.github/workflows/issue-labels.yml) and [`oss-project.yml`](.github/workflows/oss-project.yml) run when an issue opens, an event Depot CI does not take.
+- [`rivi-bot-bun.yml`](.github/workflows/rivi-bot-bun.yml) checks the Bun that rivi-bot's actions install on GitHub's runners, where those actions run in every repository that calls them. It runs only when a pull request or a push changes `rivi-bot/`.
+
 ### Pull requests from forks
 
-- **CI runs.** Read the diff before you approve a CI run for a first-time contributor. CI runs the pull request's own code: its install, tests, build and scripts. It gets a read-only token and no secrets, but nothing should run that nobody has read. Look hardest at `.github/`, `scripts/`, the `scripts` in a `package.json` and `pnpm-workspace.yaml`.
 - **Secrets.** No workflow runs a fork's code with secrets. A workflow on `pull_request_target` has them, so it must not check out the pull request and run it; [rivi-bot's](.github/workflows/rivi-bot.yml) never runs the code it checks out, and [the labeler](.github/workflows/pr-labels.yml) checks out nothing.
+- **GitHub Actions runs.** A fork's pull request that changes `rivi-bot/` runs `rivi-bot-bun.yml`, its own version of it. Read the diff before you approve the run for a first-time contributor.
 - **Small fixes.** When a pull request lacks only a changeset or a Conventional Commits title, push the changeset to the branch or edit the title yourself. Don't send the contributor round again.
+
+#### Recreating a pull request from a fork
+
+Depot CI does not run pull requests from forks yet, so a fork's pull request gets no `CI / verify` check and cannot merge. A maintainer recreates it: a branch here, `fork/<number>`, with the contributor's commits unchanged, and a pull request from that branch, where CI runs and which merges. The conversation stays on the contributor's pull request. The [`recreate-fork-pr`](.claude/skills/recreate-fork-pr/SKILL.md) skill takes an agent through the same steps.
+
+1. **Read the whole diff.** The branch runs here with this repository's trust: a workflow on it can read the repository's Depot CI secrets, and its runs share Depot Cache with every other branch. Look hardest at `.depot/`, `.github/`, `scripts/`, the `scripts` in a `package.json`, `pnpm-workspace.yaml` and new packages in `pnpm-lock.yaml`. Ask in the pull request about anything unclear, and push nothing until it is answered.
+
+2. **Push the commit you read.** Push its SHA, not the contributor's branch, so a commit they push after you read stays out:
+
+   ```bash
+   gh pr view <number> --json isCrossRepository,headRefOid,author,title,maintainerCanModify
+   git fetch origin "pull/<number>/head"
+   git rev-parse FETCH_HEAD # the headRefOid you read
+   git push origin "<headRefOid>:refs/heads/fork/<number>"
+   ```
+
+3. **Open the copy.** It has the original's title, and its body starts with `Recreates #<number> by @<author>, with their commits unchanged, so CI runs on Depot CI.`, followed by the original's sections. Comment on the original with a link to the copy, and say the conversation stays there.
+
+4. **Copy each later push.** Read what changed, then push the new head over the copy. `git range-diff` shows each commit's change, a rebase included:
+
+   ```bash
+   git fetch origin main "pull/<number>/head"
+   git range-diff origin/main <old sha> <new sha>
+   git push --force-with-lease="refs/heads/fork/<number>:<old sha>" origin "<new sha>:refs/heads/fork/<number>"
+   ```
+
+   A small fix of your own, such as a missing changeset, goes to the contributor's branch when the original allows edits by maintainers, and then over to the copy. Otherwise push it to `fork/<number>` alone and say so on the original.
+
+5. **Merge the copy.** Squash-merge it once `CI / verify` passes and the code owner approves. The commit message ends with a `Co-authored-by:` line for each author of the contributor's commits: `git log --format='Co-authored-by: %an <%ae>' origin/main..origin/fork/<number> | sort -u` lists them, and you add one that is missing. Then close the original with a link to the commit on `main`, and delete `fork/<number>`.
+
+rivi-bot counts the copy as a maintainer's pull request: it reviews each push on its own, and can approve the copy, where on the original it would only comment. Its approval counts for nothing in the ruleset, and it read text from outside the team: give it the weight of a comment.
 
 ### Reviews by rivi-bot
 
@@ -192,7 +234,7 @@ A change to a published package comes with a changeset ([Making the change](#mak
 
 On `main`, the release workflow ([`.github/workflows/release.yml`](.github/workflows/release.yml)) keeps a "Version packages" pull request open while changesets wait. Merging it publishes every version npm does not have yet, through [trusted publishing](https://docs.npmjs.com/trusted-publishers) with provenance, and tags each release.
 
-RIVI Bot, [the App above](#reviews-by-rivi-bot), opens and updates that pull request, and writes the tags and GitHub releases, with a token the workflow mints from the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret. The App needs **Contents: write** and **Pull requests: write**. Because the App pushes the commits, CI starts on the pull request by itself; on commits from the workflow's `GITHUB_TOKEN`, it waits for a maintainer to approve the run.
+RIVI Bot, [the App above](#reviews-by-rivi-bot), opens and updates that pull request, and writes the tags and GitHub releases, with a token the workflow mints from the `AUTOMATION_APP_CLIENT_ID` variable and the `AUTOMATION_APP_PRIVATE_KEY` secret. The App needs **Contents: write** and **Pull requests: write**. Its commits are signed and authored by the App.
 
 The workflow's next job copies to GitHub Packages every release that npm has and GitHub Packages lacks, with [`scripts/mirror-github-packages.ts`](scripts/mirror-github-packages.ts) and the job's `GITHUB_TOKEN`. It publishes npm's own tarball once it matches the integrity npm lists, so both registries serve the same bytes. It copies releases oldest first, and a run catches up on whatever an earlier one missed, so it needs no backfill by hand: re-run the job to retry. GitHub Packages has no `npm dist-tag`, so each copy is published with a tag that ends up where npm's points; `node scripts/mirror-github-packages.ts --dry-run` lists the copies and their tags. GitHub Packages links each package to this repository through the `repository` field, and takes its access from the repository.
 
@@ -232,9 +274,9 @@ A maintainer cuts a release once a change to `rivi-bot/` or the reusable workflo
 
 GitHub enforces the repository's rulesets; [`.github/rulesets/`](.github/rulesets) holds them and is their source of truth.
 
-- **`main.json`.** `main` changes only through pull requests, squashed, once the `verify` check passes: CI's job that passes when every Node version passed, and the code owner approves. Nobody pushes to `main` directly, force-pushes or deletes it.
+- **`main.json`.** `main` changes only through pull requests, squashed, once the `CI / verify` check from the Depot Code Access app passes and the code owner approves. `CI / verify` is the job in [`.depot/workflows/ci.yml`](.depot/workflows/ci.yml) that passes when the checks and every Node version passed. Nobody pushes to `main` directly, force-pushes or deletes it.
   - [`.github/CODEOWNERS`](.github/CODEOWNERS) makes `rikvisser-dev` the owner of every file, so every pull request needs their approval. A review by anyone else, rivi-bot's included, is advice.
-  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `verify` included, so wait for `verify` first.
+  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `CI / verify` included, so wait for `CI / verify` first.
   - A branch need not be up to date with `main` before it merges. Without a merge queue, that would rerun CI on every open pull request after each merge.
 - **`release-tags.json`.** A release tag (`@rivi-software/<name>@<version>`, `rivi-bot-v*`) is created once and is never moved or deleted, because users pin to it.
 

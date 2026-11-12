@@ -1,6 +1,6 @@
 # @rivi-software/deploy-watch
 
-[![npm version](https://img.shields.io/npm/v/@rivi-software/deploy-watch?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/deploy-watch) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/@rivi-software/deploy-watch?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/deploy-watch) [![CI status](https://img.shields.io/github/check-runs/rivi-software/tools/main?nameFilter=CI%20%2F%20verify&label=CI)](https://github.com/rivi-software/tools/commits/main) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
 
 Moves a browser tab that was open across a deploy onto the new build, at a moment that loses nothing.
 

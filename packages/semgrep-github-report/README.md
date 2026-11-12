@@ -1,6 +1,6 @@
 # @rivi-software/semgrep-github-report
 
-[![npm version](https://img.shields.io/npm/v/@rivi-software/semgrep-github-report?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/semgrep-github-report) [![CI status](https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI)](https://github.com/rivi-software/tools/actions/workflows/ci.yml) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/@rivi-software/semgrep-github-report?label=npm&color=0b6b3a)](https://www.npmjs.com/package/@rivi-software/semgrep-github-report) [![CI status](https://img.shields.io/github/check-runs/rivi-software/tools/main?nameFilter=CI%20%2F%20verify&label=CI)](https://github.com/rivi-software/tools/commits/main) [![MIT License](https://img.shields.io/badge/license-MIT-0b6b3a)](LICENSE)
 
 Reports [Semgrep](https://semgrep.dev) findings on GitHub with nothing but the job's `GITHUB_TOKEN`. On a pull request it keeps one comment up to date: it comments when findings first appear, edits that comment on every later run, and says so there once they are gone. On a full scan it lists the findings in the job summary. It needs no Semgrep account or `SEMGREP_APP_TOKEN`, files no issues, and does not fail a check over findings.
 
