@@ -12,7 +12,8 @@ branding:
 # Workers AI reads the pull request and looks at the checkout with those tools: search, read and
 # list files, and search and read issues. It runs no command, edits nothing and has no GitHub
 # tools; it ends by submitting its review in a fixed shape, which src/review.ts posts as one review
-# on the commit the model read, and as an approval only when `approve` lets it.
+# on the commit the model read, and as an approval only when `approve` lets it. Whether something
+# has to change before the pull request merges is the output `needs-changes`, whatever `approve` is.
 
 inputs:
   cloudflare-account-id:
@@ -70,12 +71,16 @@ outputs:
   reviewed:
     description: "`true` when a review was posted; `false` when there was nothing to review."
     value: ${{ steps.review.outcome == 'success' }}
+  needs-changes:
+    description: "`true` when the review found something that has to change before the pull request merges, `false` when nothing has to. With nothing new to review (the same commit again, or only a rebase since), the verdict of the reviewer's last review; empty when there is none."
+    value: ${{ steps.review.outputs.needs-changes || (steps.review.outcome == 'skipped' && steps.pr.outputs.last_needs_changes) || '' }}
 
 runs:
   using: composite
   steps:
     # The pull request as it is now, and the baseline of a follow-up review: the commit the
-    # reviewer's last review read. A review of the same commit again stops here.
+    # reviewer's last review read, and that review's verdict, which stands while there is nothing
+    # new to review. A review of the same commit again stops here.
     - name: Resolve the pull request
       id: pr
       shell: bash
@@ -103,11 +108,15 @@ runs:
         fi
         since=""
         if [ "$FOLLOW_UP" = "true" ]; then
-          # Reviews come oldest first; the last one this reviewer posted is the baseline.
-          since=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --paginate \
-            --jq ".[] | select(.user.login == \"$REVIEWER\" and .commit_id != null) | .commit_id" | tail -n 1)
+          # Reviews come oldest first; the last one this reviewer posted is the baseline. Its
+          # verdict is the last marker in its body, which src/review.ts appends (verdictMarker).
+          last=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --paginate \
+            --jq ".[] | select(.user.login == \"$REVIEWER\" and .commit_id != null) | {commit_id, body}" | jq -sc 'last // {}')
+          since=$(jq -r '.commit_id // ""' <<< "$last")
+          verdict=$(jq -r '[.body // "" | scan("<!-- rivi-bot: needs-changes=(true|false) -->")] | last // [""] | .[0]' <<< "$last")
+          echo "last_needs_changes=$verdict" >> "$GITHUB_OUTPUT"
           if [ "$since" = "$HEAD_SHA" ]; then
-            echo "$REVIEWER already reviewed $HEAD_SHA on #$PR_NUMBER; nothing new to review."
+            echo "$REVIEWER already reviewed $HEAD_SHA on #$PR_NUMBER; nothing new to review, and that review's verdict stands."
             echo "run=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -168,7 +177,7 @@ runs:
         fi
         case "$scope" in
           changes) echo "Reviewing the changes since $SINCE_SHA: $(git diff --shortstat "$replayed" "$HEAD_SHA")." ;;
-          none) echo "Nothing changed since $SINCE_SHA beyond the base; no review." ;;
+          none) echo "Nothing changed since $SINCE_SHA beyond the base; no review, and the last review's verdict stands." ;;
           full) echo "Could not separate the changes since $SINCE_SHA; reviewing the whole pull request." ;;
         esac
         echo "scope=$scope" >> "$GITHUB_OUTPUT"
@@ -209,8 +218,10 @@ runs:
     # outside the diff goes in the review's body; if GitHub refuses an inline comment all the same,
     # the review is posted again with every finding in its body. A follow-up review is smaller:
     # fewer rounds and less time (BUDGETS in src/review.ts). A review that runs out of rounds
-    # submits what it found; one that never submits posts nothing and fails. Node runs from the
-    # runner's temporary directory, outside the checkout.
+    # submits what it found; one that never submits posts nothing and fails. The verdict is the
+    # step's output `needs-changes`, and ends the review's body as a hidden marker, after anything
+    # the model wrote, so that a later run with nothing new to review can give it again. Node runs
+    # from the runner's temporary directory, outside the checkout.
     - name: Review with Workers AI
       id: review
       if: steps.pr.outputs.run == 'true' && steps.changes.outputs.scope != 'none'

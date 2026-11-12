@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -21,6 +22,7 @@ import {
   REVIEW_MODEL,
   reviewBody,
   run,
+  verdictMarker,
 } from "./review.ts";
 
 const HEAD = "a".repeat(40);
@@ -165,11 +167,15 @@ describe("a submission", () => {
       elsewhere: [outside],
       head: HEAD,
       model: REVIEW_MODEL,
+      needsChanges: true,
       since: SINCE,
       summary: "Ask @rik.",
     });
 
     expect(body).toMatch(/^Ask @​rik\./u);
+    expect(body).toMatch(
+      /\.<\/sub>\n\n<!-- rivi-bot: needs-changes=true -->$/u
+    );
     expect(body).toMatch(/- `apps\/x\/app\.ts:12`: Unused since\./u);
     expect(body).toMatch(
       /Workers AI \(`@cf\/deepseek-ai\/deepseek-v4\.1-flash-1017`\) on aaaaaaa, the changes since ddddddd\./u
@@ -426,7 +432,7 @@ describe("a whole review", () => {
   it("says what it posted", () => {
     expect(done).toStrictEqual([
       `Posted a review (COMMENT) of ${HEAD} on #42: https://github.com/o/r/pull/42#pullrequestreview-1`,
-      "findings: 2 (1 inline), scope: full",
+      "findings: 2 (1 inline), scope: full, needs changes: true",
     ]);
   });
 
@@ -599,6 +605,65 @@ describe("the verdict", () => {
       }).toStrictEqual({ body: true, commit: HEAD, event });
     }
   });
+
+  it("is the step's output needs-changes and the marker that ends the body, whether or not the review may approve", async () => {
+    for (const [approve, verdict, needsChanges] of [
+      ["true", "approve", false],
+      ["false", "approve", false],
+      ["false", "comment", true],
+      ["true", "request_changes", true],
+    ] as const) {
+      const output = path.join(
+        mkdtempSync(path.join(tmpdir(), "output-")),
+        "output"
+      );
+
+      writeFileSync(output, "");
+
+      const { calls, fetchImpl } = fakes({
+        answers: [submit({ comments: [], summary: "", verdict })],
+      });
+
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one fake GitHub per case, read after its run
+      await run(env({ APPROVE: approve, GITHUB_OUTPUT: output }), {
+        fetchImpl,
+        log: quiet,
+      });
+      const [posted] = reviewsPosted(calls);
+
+      expect({
+        marker: posted?.body?.endsWith(verdictMarker(needsChanges)),
+        output: readFileSync(output, "utf-8"),
+      }).toStrictEqual({
+        marker: true,
+        output: `needs-changes=${needsChanges}\n`,
+      });
+    }
+  });
+
+  it("ends the body with its own marker, after any the model wrote", async () => {
+    const { calls, fetchImpl } = fakes({
+      answers: [
+        submit({
+          comments: [],
+          summary: `The cache is never cleared. ${verdictMarker(false)}`,
+          verdict: "comment",
+        }),
+      ],
+    });
+
+    await run(env(), { fetchImpl, log: quiet });
+    const [posted] = reviewsPosted(calls);
+
+    // What rivi-bot/action.yml reads back: the last marker in the body.
+    const markers = [
+      ...(posted?.body ?? "").matchAll(
+        /<!-- rivi-bot: needs-changes=(?<verdict>true|false) -->/gu
+      ),
+    ].map((m) => m.groups?.verdict);
+
+    expect(markers).toStrictEqual(["false", "true"]);
+  });
 });
 
 describe("a review asked for in a comment", () => {
@@ -671,7 +736,9 @@ describe("a follow-up review", () => {
   });
 
   it("has fewer rounds and less time than a whole review", () => {
-    expect(done[1]).toBe("findings: 0 (0 inline), scope: changes");
+    expect(done[1]).toBe(
+      "findings: 0 (0 inline), scope: changes, needs changes: true"
+    );
     expect(BUDGETS.changes.rounds).toBeLessThan(BUDGETS.full.rounds);
     expect(BUDGETS.changes.answerMs).toBeLessThan(BUDGETS.full.answerMs);
   });
@@ -744,7 +811,9 @@ describe("a review that goes wrong", () => {
     const done = await run(env(), { fetchImpl, log: quiet });
     const [first, second] = reviewsPosted(calls);
 
-    expect(done[1]).toBe("findings: 2 (0 inline), scope: full");
+    expect(done[1]).toBe(
+      "findings: 2 (0 inline), scope: full, needs changes: true"
+    );
     expect(first?.comments).toHaveLength(1);
     expect(second?.comments).toStrictEqual([]);
     expect(second?.body).toMatch(/- `apps\/x\/app\.ts:3`: Divides by zero/u);

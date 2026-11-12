@@ -5,11 +5,13 @@
 // of one file, and ends by calling `submit_review`. This script then posts one review on the commit
 // it was given: an approval only when `APPROVE` is `true` and the model found nothing that has to
 // change, otherwise a comment, never a request for changes, with each finding on a line of the
-// diff as an inline comment and any other in the review's body. A follow-up review of the changes
-// since the last one (`SCOPE` `changes`, the diff in `CHANGES_FILE`) gets fewer rounds and less time.
-// Node built-ins only, run as `node rivi-bot/src/review.ts`; tests in review.test.ts.
+// diff as an inline comment and any other in the review's body. Whether something has to change is
+// the step's output `needs-changes`, and a hidden marker at the end of the body. A follow-up review
+// of the changes since the last one (`SCOPE` `changes`, the diff in `CHANGES_FILE`) gets fewer
+// rounds and less time. Node built-ins only, run as `node rivi-bot/src/review.ts`; tests in
+// review.test.ts.
 
-import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 import { checkoutFile, codeTools } from "./code-tools.ts";
 import type { CodeTools } from "./code-tools.ts";
@@ -399,18 +401,28 @@ export const placeFindings = (
   inline: comments.filter((c) => diff.get(c.path)?.lines.has(c.line)),
 });
 
+/**
+ * The verdict, hidden at the end of a review's body: `true` when something has to change before
+ * the pull request merges. rivi-bot/action.yml reads the last one in the reviewer's last review, to
+ * give the verdict again when a run has nothing new to review.
+ */
+export const verdictMarker = (needsChanges: boolean): string =>
+  `<!-- rivi-bot: needs-changes=${needsChanges} -->`;
+
 export const reviewBody = ({
   summary,
   elsewhere,
   model,
   head,
   since,
+  needsChanges,
 }: {
   summary: string;
   elsewhere: Finding[];
   model: string;
   head: string;
   since?: string;
+  needsChanges: boolean;
 }): string =>
   [
     quietMentions(summary),
@@ -423,6 +435,8 @@ export const reviewBody = ({
           .join("\n")}`
       : "",
     `<sub>rivi-bot with Workers AI (\`${model}\`) on ${head.slice(0, 7)}${since ? `, the changes since ${since.slice(0, 7)}` : ""}.</sub>`,
+    // Last, after the model's text, so that a marker the model wrote cannot stand for the verdict.
+    verdictMarker(needsChanges),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -702,11 +716,13 @@ const postReview = async (
   env: Env,
   {
     submission,
+    needsChanges,
     diff,
     scope,
     model,
   }: {
     submission: Submission;
+    needsChanges: boolean;
     diff: Map<string, DiffFile>;
     scope: Scope;
     model: string;
@@ -716,16 +732,14 @@ const postReview = async (
   const { inline, elsewhere } = placeFindings(submission.comments, diff);
 
   // An approval only where the caller lets the review approve.
-  const event =
-    env.APPROVE === "true" && submission.verdict === "approve"
-      ? "APPROVE"
-      : "COMMENT";
+  const event = env.APPROVE === "true" && !needsChanges ? "APPROVE" : "COMMENT";
 
   const review = (inlined: Finding[], outside: Finding[]): JsonObject => ({
     body: reviewBody({
       elsewhere: outside,
       head: env.HEAD_SHA ?? "",
       model,
+      needsChanges,
       since: scope === "changes" ? env.SINCE_SHA : undefined,
       summary: submission.summary,
     }),
@@ -847,16 +861,23 @@ export const run = async (
     tools: codeTools(root, api, { repo: env.GITHUB_REPOSITORY }),
   });
 
+  const needsChanges = submission.verdict !== "approve";
+
   const posted = await postReview(
     api,
     env,
-    { diff, model, scope, submission },
+    { diff, model, needsChanges, scope, submission },
     log
   );
 
+  // The step's output, which the reusable workflow's check reads.
+  if (env.GITHUB_OUTPUT) {
+    appendFileSync(env.GITHUB_OUTPUT, `needs-changes=${needsChanges}\n`);
+  }
+
   return [
     `Posted a review (${posted.event}) of ${env.HEAD_SHA} on #${number}: ${posted.html_url ?? "posted"}`,
-    `findings: ${submission.comments.length} (${posted.inline} inline), scope: ${scope}`,
+    `findings: ${submission.comments.length} (${posted.inline} inline), scope: ${scope}, needs changes: ${needsChanges}`,
   ];
 };
 

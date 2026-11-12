@@ -8,7 +8,7 @@ RIVI Software runs it as RIVI Bot on its own repositories, through [a reusable w
 
 | Feature | Runs | What it writes | Default |
 | --- | --- | --- | --- |
-| [review](#review) | When a pull request opens and after every push; [when asked](#asking-rivi-bot) | One review with inline comments, pinned to the commit it read | On |
+| [review](#review) | When a pull request opens and after every push; [when asked](#asking-rivi-bot) | One review with inline comments, pinned to the commit it read; a check that fails when something has to change | On |
 | [describe](#describe) | When a pull request opens; when asked | A summary in the pull request's description, and labels | Off |
 | [triage](#triage) | When an issue opens; when asked | One comment: what the issue is, possible duplicates, what is missing, where to look, an approach, and a prompt for a coding agent; and labels | Off |
 | [fix](#fix) | When asked | A commit on the pull request's branch that fixes the open review findings, or what was asked | Off |
@@ -175,6 +175,7 @@ In a review thread, `ask` answers in the thread and `fix` does what the thread a
 
   Style and lint are left to CI.
 - **What it writes.** Exactly one review on the commit it read: an inline comment per finding on a line of the head that the diff shows, with a suggestion block when the fix replaces that one line and it is sure of it, and a short body with the findings that need a change, one line each, then any finding on another line. If GitHub refuses a comment's line all the same, the review carries every comment in its body instead. The review comments; it approves only with `approve`, which the reusable workflow passes only for a pull request by someone with write access. It never requests changes and never posts a plain comment.
+- **The check.** The review job's check on the pull request fails when the review found something that has to change before the pull request merges, and passes when nothing has to; optional suggestions do not fail it. This holds whether or not the review may approve. With nothing new to review, such as a re-run on the same commit or a push that only rebases, the last review's verdict stands, so neither turns the check green. A review asked for in a comment runs on the default branch, whose latest commit gets its check, so that check passes whatever the review found. On an outside pull request, text in the pull request can steer the verdict as it can the review: a passing check there is not an approval.
 - **When.** A pull request by someone with write access when it opens or leaves draft, and after every push (`auto: internal`). Any other pull request once a maintainer adds the `rivi-bot:review` label, and after every push while the label stays on, until a maintainer takes it off; or once, when a maintainer asks for a review. A push to a draft is not reviewed, but the label still asks for a review of a draft.
 - **Approvals.** An approval stands for the commit it read. Before a review of a later commit, the reviewer's earlier approvals on the pull request are dismissed, and the new review approves again if nothing has to change.
 - **Follow-up reviews.** After an earlier review by the same login, it reads only what changed since the commit that review read. It replays that commit's changes onto the pull request's current fork point (`git merge-tree`), so a rebase onto the base, or a merge of it, is not reviewed again. If nothing changed but the base, there is no review.
@@ -313,7 +314,7 @@ Taking the label off makes each approval good for one review: a later push needs
 | `instructions` | | Instructions for this one review, which may narrow or steer it |
 | `model` | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | The Workers AI model, one that takes tools through Chat Completions |
 
-The output `reviewed` is `true` when a review was posted.
+The output `reviewed` is `true` when a review was posted. The output `needs-changes` is `true` when the review found something that has to change before the pull request merges, and `false` when nothing has to, whatever `approve` is. With nothing new to review, it is the verdict of the reviewer's last review, which the action keeps in a hidden marker at the end of each review's body. The action itself does not fail on it: to fail the check, add a step after it that fails when `needs-changes` is `true`.
 
 The actions run on GitHub's Linux runners, which come with `gh`, `jq`, `yq` and `git`. The review sets up Node 24 with `actions/setup-node`, which stays on the job's `PATH` for the steps after it, and its script imports only Node's built-ins, so nothing is installed. The other actions use [Claude Code's GitHub Action](https://github.com/anthropics/claude-code-action), pinned to a commit. They give it the Bun it pins from the npm registry, checked against a pinned integrity ([`install-bun.sh`](install-bun.sh)), so they do not depend on GitHub's release downloads; when the registry fails, the action downloads Bun from GitHub itself.
 
