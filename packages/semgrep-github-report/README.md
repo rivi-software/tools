@@ -166,7 +166,7 @@ const markdown = formatFindingsSummary(findings, { repository: "acme/app", sha: 
 
 ## Limits
 
-- **One comment per pull request.** Every run that reports on a pull request edits the same comment, so two jobs that report different scans on one pull request overwrite each other's findings.
+- **One comment per account.** Every run that reports on a pull request as the same account edits the same comment, so two jobs that report different scans with the same token overwrite each other's findings. Two jobs that comment as different accounts, each named with `--author`, keep a comment each.
 - **Runs at the same time.** Two runs on a pull request without a comment can each create one; the example's `concurrency` group prevents that.
 - **Comment length.** GitHub takes at most 65,536 characters in a comment, roughly 60 findings with registry-length messages. Past that, the comment leaves out the messages, then the table rows that do not fit, and its last line says so; a local `semgrep scan` shows them all.
 - **Job summary size.** GitHub drops a step's summary over 1 MiB, some 4,000 findings, with an error annotation; the step still passes.

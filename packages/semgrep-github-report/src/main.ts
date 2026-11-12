@@ -99,8 +99,9 @@ const parseOptions = (argv: string[]): Options | undefined => {
     throw new Error(`Invalid --mode ${mode ?? "(missing)"}\n\n${USAGE}`);
   }
 
-  // A workflow that passes an unset variable would otherwise add a comment on every run.
-  if (!author) {
+  // A workflow that passes an unset variable would otherwise add a comment on every run. Only
+  // --mode pr reads it, so a summary step that shares the variable still runs.
+  if (mode === "pr" && !author) {
     throw new Error(`Invalid --author: an empty login\n\n${USAGE}`);
   }
 

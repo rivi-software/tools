@@ -546,6 +546,24 @@ describe(main, () => {
       );
     });
 
+    it("ignores an empty --author in --mode summary, which does not read it", async () => {
+      await expect(
+        main(
+          [
+            "--mode",
+            "summary",
+            "--author",
+            "",
+            "--sha",
+            "abc123",
+            "--findings",
+            findingsFile(),
+          ],
+          { GITHUB_REPOSITORY: "acme/app" }
+        )
+      ).resolves.toBe("## Semgrep findings on `abc123` (0)\n\nNo findings.\n");
+    });
+
     it("prints its help", async () => {
       await expect(main(["--help"], {})).resolves.toBe(USAGE);
       await expect(main(["-h"], {})).resolves.toBe(USAGE);
