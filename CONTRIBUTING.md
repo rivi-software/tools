@@ -62,7 +62,7 @@ Work on a branch in your fork. One pull request makes one change, to one package
 ### Opening the pull request
 
 - **Title.** It follows [Conventional Commits](https://www.conventionalcommits.org), with the package's directory as the scope: `fix(workers-mail): …`, `feat(deploy-watch): …`, `docs: …`. Pull requests are squash-merged, and the title becomes the commit on `main`.
-- **Description.** Say what changes and why, and link the issue it closes (`Closes #123`). Show how you know it works: the tests you added or ran, and what you tried by hand. The template has the sections.
+- **Description.** Say who the change is for and what is wrong for them today, what they will notice after it, and link the issue it closes (`Closes #123`). Show how you know it works: the tests you added or ran, and what you tried by hand. Say whether it needs a changeset, and what a revert would undo. The template has the sections, and a comment in each says what goes there.
 - **Allow edits by maintainers.** Leave it checked. A maintainer can then push a small fix to your branch, such as a missing changeset, instead of asking you for it.
 - **Draft.** Open the pull request as a draft if you want feedback before it is done.
 
@@ -79,7 +79,7 @@ The repository is [MIT](LICENSE) licensed. When you open a pull request, you agr
 
 ### AI tools
 
-You may use AI tools to write an issue or a pull request, and you are its author all the same. Understand every line you submit, run `pnpm run verify` yourself, and say in the pull request what you checked. A maintainer may close a pull request that reads as unreviewed generated output, or a report that nobody can reproduce.
+You may use AI tools to write an issue or a pull request, and you are its author all the same. Understand every line you submit, run `pnpm run verify` yourself, and say in the pull request what you checked. Fill in the template's Agent context section: which tool and model wrote the code, and how much of it you directed. A maintainer may close a pull request that reads as unreviewed generated output, or a report that nobody can reproduce.
 
 ## Adding a package
 
