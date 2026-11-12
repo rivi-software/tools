@@ -412,23 +412,22 @@ export const createDeployWatch = ({
 
   /**
    * Moves the tab onto the live build, `href` as a whole page or this page again, after writing
-   * the loop guard; whether the tab is reloading. Where the browser refuses storage, a reload the
-   * user asked for (`byUser`) still happens and only the guard is lost, since each reload in a
-   * loop would take a click. One nobody asked for does not happen: a host that serves the old page
-   * again would loop it.
+   * the loop guard; whether the tab is reloading. Where the browser refuses storage, the reload
+   * happens without the guard only when `guardOptional`. An error screen's reload does not: a host
+   * that serves the old page again would bring the error back and loop it.
    */
   const startReload = ({
     href,
-    byUser = false,
+    guardOptional = false,
   }: {
     href?: string;
-    byUser?: boolean;
+    guardOptional?: boolean;
   } = {}): boolean => {
     if (reloading) {
       return true;
     }
 
-    if (!live || !(remember(RELOADED_FOR_KEY, live.id) || byUser)) {
+    if (!live || !(remember(RELOADED_FOR_KEY, live.id) || guardOptional)) {
       return false;
     }
 
@@ -439,11 +438,11 @@ export const createDeployWatch = ({
   };
 
   /**
-   * Moves the tab onto the live build: `href` as a whole page, or this page again. The user asked
-   * for it, from the notice or by moving to another page, so it happens without storage too.
+   * Moves the tab onto the live build: `href` as a whole page, or this page again. For the
+   * notice, which the user starts, and a move to another page; both happen without storage too.
    */
   const reload = (href?: string) => {
-    startReload({ href, byUser: true });
+    startReload({ href, guardOptional: true });
   };
 
   /**

@@ -146,7 +146,7 @@ const afterADeploy = async (own: Answer) => {
 
 /**
  * What a tab replaced by build `b`, with `storage` as its session storage, does for an error
- * screen's missing chunk, and then for a reload the user asks for at a move to another page.
+ * screen's missing chunk, and then at a move to another page.
  */
 const replacedWithStorage = async (storage: DeployWatchDeps["storage"]) => {
   const loads: (string | undefined)[] = [];
@@ -469,10 +469,9 @@ describe(createDeployWatch, () => {
     expect(unstored.isReloading()).toBeFalsy();
   });
 
-  it("with no storage to guard the loop, an error screen does not reload onto a newer build; the user still can", async () => {
+  it("with no storage to guard the loop, an error screen does not reload onto a newer build; a move to another page still does", async () => {
     // A host that serves the old page after the assets moved on brings the error back with every
-    // reload, and nothing in the tab would remember the last one. The screen shows instead; the
-    // user's own move to another page still reloads.
+    // reload, and nothing in the tab would remember the last one. The screen shows instead.
     const screenShows = {
       forTheError: { recovers: false, reloading: false, loads: [] },
       loadsAtTheMove: [undefined],
