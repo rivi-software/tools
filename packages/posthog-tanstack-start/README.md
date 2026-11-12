@@ -127,6 +127,8 @@ With [`@rivi-software/deploy-watch`](https://github.com/rivi-software/tools/tree
 - **The browser.** `initPostHog` loads posthog-js as its own chunk after hydration (about 100 kB gzipped), so no page waits for it. It applies the SDK defaults of 2026-05-30 and tracing headers to the page's own host, then the app's options over them.
 
   `withPostHog` runs a callback once the SDK has loaded (identify, reset, a custom event), and does nothing while PostHog is off. `captureClientException` reports what the router's error boundaries catch, which never reaches `window.onerror`.
+
+  When posthog-js does not load, such as on a dropped connection or in a tab that outlived the deploy that removed its chunk, `initPostHog` logs one warning and PostHog stays off: `withPostHog` and `captureClientException` do nothing, and no rejection reaches the app's `unhandledrejection` handlers. The next call to `initPostHog` imports posthog-js again. When posthog-js throws as it starts, `initPostHog` logs one warning too, and PostHog stays off for the page: posthog-js counts itself started before it throws, so a second `init` would do nothing.
 - **Source maps.** `posthogSourcemaps` uploads the browser's maps and the server environments' maps as release `releaseName` at `releaseVersion`. The version defaults to `GITHUB_SHA`, else `WORKERS_CI_COMMIT_SHA`. The browser's maps are deleted after the upload, so they are never served. The server's stay on disk for Wrangler's own upload (`upload_source_maps`). Without `POSTHOG_PERSONAL_API_KEY` it returns no plugins, so a local build uploads nothing and needs no PostHog credentials.
 
 ## In your app's tests
@@ -139,7 +141,7 @@ Pin `POSTHOG_PROJECT_TOKEN` empty in your test config, so no test reports to you
 
 ## Development
 
-The package's tests run in Node: `vitest.config.ts` points `cloudflare:workers` at `tests/cloudflare-workers.ts`, a stand-in with the Worker vars and no request context. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
+The package's tests run in Node: `vitest.config.ts` points `cloudflare:workers` at `tests/cloudflare-workers.ts`, a stand-in with the Worker vars and no request context. `tests/browser.test.ts` runs in happy-dom instead, a dev dependency, with a stand-in posthog-js that fails to load or to start. In this directory, run `pnpm run test`, `pnpm run check` and `pnpm run build`.
 
 ## License
 
