@@ -9,7 +9,7 @@ export interface PostHogBrowserConfig {
   host: string;
 }
 
-/** The SDK once it has loaded, or `null` when its chunk did not load. `null` while PostHog is off. */
+/** The SDK once it has started, or `null` when it did not load or start. `null` while PostHog is off. */
 let ready: Promise<PostHog | null> | null = null;
 
 const startPostHog = async (
@@ -31,12 +31,22 @@ const startPostHog = async (
     return null;
   }
 
-  posthog.init(config.token, {
-    api_host: config.host,
-    defaults: "2026-05-30",
-    tracing_headers: [location.hostname],
-    ...options,
-  });
+  try {
+    posthog.init(config.token, {
+      api_host: config.host,
+      defaults: "2026-05-30",
+      tracing_headers: [location.hostname],
+      ...options,
+    });
+  } catch (error) {
+    // posthog-js counts itself started before it throws, so a second `init` would hand back the half-started SDK.
+    console.warn(
+      "posthog-js did not start, so PostHog reports nothing on this page",
+      error
+    );
+
+    return null;
+  }
 
   return posthog;
 };
@@ -46,7 +56,8 @@ const startPostHog = async (
  * 2026-05-30. The SDK is its own chunk (about 100 kB gzipped) loaded after hydration, so no page waits for it.
  * Same-origin requests (server functions, /api) carry the browser's distinct and session id, so an exception
  * `captureServerException` reports links to the person and the session replay. A cookieless visitor sends no
- * distinct id. When the chunk does not load, it warns once and PostHog stays off until the next call.
+ * distinct id. When the chunk does not load, it warns once and PostHog stays off until the next call. When the SDK
+ * throws as it starts, it warns once and PostHog stays off for the page.
  */
 export const initPostHog = (
   config: PostHogBrowserConfig | null,
