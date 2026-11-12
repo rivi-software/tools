@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "ignore": "^5.3.2",
-    "minimatch": "^11.0.3"
+    "minimatch": "^11.0.4"
   },
   "devDependencies": {
     "vite": "8.3.5",
