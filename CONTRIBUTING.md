@@ -278,26 +278,16 @@ npm adds a trusted publisher only to a package that already exists, so a maintai
 
 rivi-bot has no changesets and no npm package. A version is a `rivi-bot-v<major>.<minor>.<patch>` tag on `main`, with a GitHub release. It matters to a repository that pins the actions themselves: the reusable workflow runs them from `main`, so its callers get every change as soon as it merges.
 
-A maintainer cuts a release by hand once a change to `rivi-bot/` or the reusable workflow has merged that callers who pin should get:
+A maintainer cuts a release once a change to `rivi-bot/` or the reusable workflow has merged that callers who pin should get. The release raises one part of the version:
 
-- **Major** for a change a caller has to act on, such as an input or output removed or renamed, or a default that changes what runs.
-- **Minor** for something new: an action, an input or a behaviour.
-- **Patch** for a fix. A security fix gets its tag as soon as it merges, and its advisory names that version as patched.
+- **Major** for a change a caller has to act on, such as an input or output removed or renamed, or a default that changes what runs. Its pull request title has a `!`, such as `feat(rivi-bot)!: …`.
+- **Minor** for something new: an action, an input or a behaviour. Its title starts with `feat`.
+- **Patch** for a fix, and for anything else. A security fix gets its tag as soon as it merges, and its advisory names that version as patched.
 
-1. Wait for CI to pass on the commit. A tag is never moved, so it has to point at the right one.
-2. List what changed since the last release:
-
-   ```bash
-   git fetch origin main --tags
-   git log --oneline "$(git describe --tags --abbrev=0 --match 'rivi-bot-v*' origin/main)..origin/main" -- rivi-bot .github/workflows/rivi-bot.yml
-   ```
-
-3. Write the notes for the people who run rivi-bot, under the headings that apply: Security, Changes, and Upgrading for what a caller has to do. [rivi-bot-v1.0.0](https://github.com/rivi-software/tools/releases/tag/rivi-bot-v1.0.0) shows the shape.
-4. Create the tag and the release on that commit:
-
-   ```bash
-   gh release create rivi-bot-v<version> --target <commit sha> --title rivi-bot-v<version> --notes-file notes.md
-   ```
+1. Run the [rivi-bot release workflow](.github/workflows/rivi-bot-release.yml) from `main`, under **Actions → rivi-bot release → Run workflow**, or with `gh workflow run rivi-bot-release.yml --ref main`. With `bump` at `auto`, the version follows the commit titles since the last tag; choose `major`, `minor` or `patch` when a title gets it wrong. `commit` releases a commit of `main` other than its head.
+2. The workflow stops when the commit is not on `main`, when `CI / verify` has not passed on it, when nothing in `rivi-bot/` or the reusable workflow changed since the last release, or when another rivi-bot release waits as a draft. Otherwise it drafts the release, with notes that list the commits, and its job summary links the draft. [`scripts/release-rivi-bot.ts`](scripts/release-rivi-bot.ts) says how to run it on a clone with `--dry-run`, which drafts nothing.
+3. Rewrite the draft's notes for the people who run rivi-bot, under the headings that apply: Security, Changes, and Upgrading for what a caller has to do. [rivi-bot-v1.0.0](https://github.com/rivi-software/tools/releases/tag/rivi-bot-v1.0.0) shows the shape.
+4. Publish the draft. Publishing creates the tag on the commit the draft names, and a tag is never moved, so the workflow tags nothing itself.
 
 ### Rulesets
 
