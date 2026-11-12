@@ -170,17 +170,18 @@ A pull request from a branch here that shows no `CI /` checks at all, `CI / veri
 
 1. **Find the run.** `depot ci workflow list --repo rivi-software/tools --pr <number>` lists it as `(unnamed)` and `failed`. `depot ci status <run id>` gives its error, which starts with `Merge ref refs/pull/<number>/merge is stale`.
 
-2. **Wait for the merge ref.** GitHub builds it in the background. It is current when its second parent is the pull request's head commit. While it is not, a new commit fails in the same way.
+2. **Close and reopen the pull request.** GitHub then rebuilds the merge ref, and Depot CI starts a run on the `reopened` event, with the same commits. A new commit, which the error suggests, may not help: GitHub can leave the merge ref stale through it, and the new run fails in the same way.
+
+   ```bash
+   gh pr close <number> && gh pr reopen <number>
+   ```
+
+3. **Check the merge ref.** It is current when its second parent is the pull request's head commit, and then the `CI /` checks appear within a minute.
 
    ```bash
    gh pr view <number> --json headRefOid --jq .headRefOid
    git fetch origin "pull/<number>/merge" && git log -1 --format=%P FETCH_HEAD
    ```
-
-3. **Push a new commit.** As the error says, a new commit starts a new run.
-   - On a branch of a maintainer, push an empty commit, such as `git commit --allow-empty -m "ci: run CI again on Depot CI"`.
-   - On a pull request from Dependabot, comment `@dependabot recreate`.
-   - The release workflow rewrites the "Version packages" pull request, from `changeset-release/main`, on the next push to `main`.
 
 ### Pull requests from forks
 
