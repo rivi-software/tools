@@ -4,6 +4,7 @@
 # Claude's answer is shaped by text anyone can write, so a name is added only when the repository
 # has it, spelled exactly as there; it is not on already; and no pattern in the deny list matches
 # it. The deny list keeps out the labels a maintainer sets, such as one that starts a coding agent.
+# Claude is shown only the labels it may add (addable), and its answer is checked all the same.
 # A pattern is a label name, with * for any run of characters, and matches whatever the case.
 # rivi-bot's own labels (rivi-bot:*) are never added, whatever the list says: rivi-bot:review
 # approves reviews.
@@ -18,6 +19,10 @@ def matches($pattern):
 
 # Whether the deny list, or rivi-bot's own prefix, holds back the label name that is the input.
 def denied($deny): . as $name | any(($deny + ["rivi-bot:*"])[]; . as $pattern | $name | matches($pattern));
+
+# The repository's labels (the input, as `gh label list --json name,description` writes them) that
+# rivi-bot may add: the ones Claude is shown.
+def addable($deny): map(select(.name | denied($deny) | not));
 
 # Claude's names (the input), as those rivi-bot adds and those it holds back for a maintainer. Both
 # leave out names the repository does not have ($known) and labels already on ($on).
