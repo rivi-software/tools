@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { D1MigrationError, migrateD1 } from "../src/index.js";
 import type { D1DatabaseLike } from "../src/index.js";
@@ -21,20 +21,15 @@ const INDEX = {
 
 const MIGRATIONS = [INIT, SEED, INDEX];
 
-let open: Awaited<ReturnType<typeof openDatabase>>[] = [];
+type Opened = Awaited<ReturnType<typeof openDatabase>>;
 
-const database = async () => {
-  const opened = await openDatabase();
-  open.push(opened);
+let opened: Opened;
 
-  return opened.db;
-};
+/** The test's own new database. */
+let db: Opened["db"];
 
-const recorded = async (
-  db: Awaited<ReturnType<typeof database>>,
-  table = "d1_migrations"
-) => {
-  const { results } = await db
+const recorded = async (database: Opened["db"], table = "d1_migrations") => {
+  const { results } = await database
     .prepare(
       `SELECT id, name FROM "${table.replaceAll('"', '""')}" ORDER BY id`
     )
@@ -44,13 +39,19 @@ const recorded = async (
 };
 
 describe(migrateD1, () => {
-  afterEach(async () => {
-    await Promise.all(open.map((opened) => opened.dispose()));
-    open = [];
-  });
+  /**
+   * Starting Miniflare for a database takes a few hundred milliseconds on a laptop and has passed
+   * five seconds on a busy CI runner. In a hook it gets a limit of its own, and each test keeps the
+   * default limit for what it checks.
+   */
+  beforeEach(async () => {
+    opened = await openDatabase();
+    ({ db } = opened);
+  }, 60_000);
+
+  afterEach(() => opened.dispose());
 
   it("applies every migration in order to a new database, and records each", async () => {
-    const db = await database();
     await expect(
       migrateD1(db, { migrations: MIGRATIONS })
     ).resolves.toStrictEqual({
@@ -66,7 +67,6 @@ describe(migrateD1, () => {
   });
 
   it("applies only what the database lacks, and nothing on a second call", async () => {
-    const db = await database();
     await migrateD1(db, { migrations: MIGRATIONS.slice(0, 1) });
     await expect(
       migrateD1(db, { migrations: MIGRATIONS })
@@ -82,7 +82,6 @@ describe(migrateD1, () => {
   });
 
   it("records in the table it is given", async () => {
-    const db = await database();
     await migrateD1(db, {
       table: 'schema "migrations"',
       migrations: MIGRATIONS.slice(0, 1),
@@ -93,8 +92,6 @@ describe(migrateD1, () => {
   });
 
   it("leaves nothing of a migration that fails, and says which one failed", async () => {
-    const db = await database();
-
     const broken = {
       name: "0002_broken.sql",
       queries: [
@@ -136,7 +133,6 @@ describe(migrateD1, () => {
   });
 
   it("goes on when another call applied a migration between its read and its batch", async () => {
-    const db = await database();
     await migrateD1(db, { migrations: MIGRATIONS });
     // A call that read the table before the first one wrote it: its first read finds nothing.
     let stale = true;
@@ -177,8 +173,6 @@ describe(migrateD1, () => {
   });
 
   it("applies each migration once when calls overlap", async () => {
-    const db = await database();
-
     const results = await Promise.all(
       Array.from({ length: 4 }, () => migrateD1(db, { migrations: MIGRATIONS }))
     );
@@ -197,7 +191,6 @@ describe(migrateD1, () => {
   });
 
   it("leaves alone a migration the database records and the list lacks", async () => {
-    const db = await database();
     await migrateD1(db, {
       migrations: [
         ...MIGRATIONS.slice(0, 1),
