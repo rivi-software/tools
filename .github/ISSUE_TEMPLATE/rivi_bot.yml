@@ -13,7 +13,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The ref you call rivi-bot at, such as `main`, a `rivi-bot-v*` tag or a commit SHA.
+      description: The ref you call rivi-bot at, such as `main`, a `rivi-bot-v*` tag or a commit SHA. The reusable workflow runs its actions from `main` at any ref, so with it, also give the date of the run.
       placeholder: rivi-software/tools/.github/workflows/rivi-bot.yml@main
     validations:
       required: true
