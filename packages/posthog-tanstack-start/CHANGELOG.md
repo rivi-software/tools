@@ -1,5 +1,12 @@
 # @rivi-software/posthog-tanstack-start
 
+## 0.1.3
+
+### Patch Changes
+
+- 212bfb0: The Worker's secret paths (`setSecretPaths`) now leave as their pattern in a `captureServerEvent` event's properties too, as they do in an exception's. An app that sets no secret paths sends its events as before. On both sides, a property that holds itself now leaves redacted, with `"[Circular]"` where it holds itself, as posthog-node writes it; before, the redaction overflowed the stack on it.
+- 017dee0: The Worker now sends an exception with its secret paths (`setSecretPaths`) as their pattern in the error's message and stack and in the properties sent with it, not only in `$current_url` and `$pathname`. Before, an error such as ``new Error(`ticket ${request.url} not found`)`` sent the link to PostHog.
+
 ## 0.1.2
 
 ### Patch Changes
