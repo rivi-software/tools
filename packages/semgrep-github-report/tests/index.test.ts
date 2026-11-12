@@ -93,6 +93,14 @@ describe(formatFindingsSummary, () => {
     );
   });
 
+  it("escapes a | in a path, so the row keeps its three cells", () => {
+    expect(
+      formatFindingsSummary([finding("src/a|b.ts", 7)], revision)
+    ).toContain(
+      "| ERROR | [`example.rule`](https://sg.run/x) | [`src/a\\|b.ts:7`](https://github.com/acme/app/blob/abc123/src/a%7Cb.ts#L7) |\n"
+    );
+  });
+
   it("leaves the rule unlinked when Semgrep gives no shortlink", () => {
     const { metadata: _, ...extra } = finding("src/a.ts", 1).extra;
 
@@ -189,6 +197,99 @@ describe(formatFindingsComment, () => {
         "u"
       )
     );
+  });
+});
+
+/** U+200D, which the comment puts after each `@`, `<` and `&` of a message. */
+const ZERO_WIDTH_JOINER = String.fromCodePoint(0x20_0d);
+
+/** A finding in `src/a.ts` whose message is `message`. */
+const findingSaying = (message: string): SemgrepFinding => {
+  const found = finding("src/a.ts", 7);
+
+  return { ...found, extra: { ...found.extra, message } };
+};
+
+describe("formatFindingsComment with text from the scanned code", () => {
+  it("escapes a | in a path in the table, and only there", () => {
+    const comment = formatFindingsComment([finding("src/a|b.ts", 7)], revision);
+
+    expect(comment).toContain(
+      "| ERROR | [`example.rule`](https://sg.run/x) | [`src/a\\|b.ts:7`](https://github.com/acme/app/blob/abc123/src/a%7Cb.ts#L7) |\n"
+    );
+    expect(comment).toContain("\n### `example.rule` — `src/a|b.ts:7`\n");
+  });
+
+  it("keeps an @ mention in a message from notifying anyone, written out or as a character reference", () => {
+    const comment = formatFindingsComment(
+      [findingSaying("Ask @some-org/some-team, or &#64;someone.")],
+      revision
+    );
+
+    expect(comment).toContain(
+      `\n\nAsk @${ZERO_WIDTH_JOINER}some-org/some-team, or &${ZERO_WIDTH_JOINER}#64;someone.\n\n`
+    );
+    expect(comment).not.toMatch(/@\w|&#/u);
+  });
+
+  it("shows an unclosed <!-- in a message as text, so it hides nothing after it", () => {
+    const comment = formatFindingsComment(
+      [
+        findingSaying("<!-- opens a comment that never closes"),
+        finding("src/b.ts", 2),
+      ],
+      revision
+    );
+
+    expect(comment.replace(COMMENT_MARKER, "")).not.toContain("<!--");
+    expect(comment).toContain(
+      `\n\n<${ZERO_WIDTH_JOINER}!-- opens a comment that never closes\n\nRule link: https://sg.run/x\n\n`
+    );
+    expect(comment).toContain("\n### `example.rule` — `src/b.ts:2`\n");
+  });
+
+  it("joins nothing visible to a message's code, so a code span still shows it as written", () => {
+    const comment = formatFindingsComment(
+      [findingSaying("Avoid `<div dangerouslySetInnerHTML>`.")],
+      revision
+    );
+
+    expect(comment).toContain(
+      `\n\nAvoid \`<${ZERO_WIDTH_JOINER}div dangerouslySetInnerHTML>\`.\n\n`
+    );
+  });
+
+  it("fences a path with backticks in one more backtick than its longest run", () => {
+    const comment = formatFindingsComment(
+      [finding("src/a``b`.ts", 7)],
+      revision
+    );
+
+    expect(comment).toContain(
+      "| [```src/a``b`.ts:7```](https://github.com/acme/app/blob/abc123/src/a%60%60b%60.ts#L7) |\n"
+    );
+    expect(comment).toContain("\n### `example.rule` — ```src/a``b`.ts:7```\n");
+  });
+
+  it("pads a code span whose text starts or ends with a backtick", () => {
+    const comment = formatFindingsComment(
+      [{ ...finding("`a.ts", 7), check_id: "example.rule`" }],
+      revision
+    );
+
+    expect(comment).toContain("\n### `` example.rule` `` — `` `a.ts:7 ``\n");
+  });
+
+  it("keeps a path with a line break on its line, in the table and its heading", () => {
+    const comment = formatFindingsComment(
+      [finding("src/a\n<!--.ts", 7)],
+      revision
+    );
+
+    expect(comment).toContain(
+      "| ERROR | [`example.rule`](https://sg.run/x) | [`src/a <!--.ts:7`](https://github.com/acme/app/blob/abc123/src/a%0A%3C!--.ts#L7) |\n"
+    );
+    expect(comment).toContain("\n### `example.rule` — `src/a <!--.ts:7`\n");
   });
 });
 

@@ -72,6 +72,37 @@ export const semgrepFingerprint = (finding: SemgrepFinding): string => {
   return createHash("sha256").update(payload).digest("hex").slice(0, 40);
 };
 
+/**
+ * `text` as Markdown that shows it as written, inside a code span or out of one: a zero-width
+ * joiner after each `@`, `<` and `&` keeps GitHub from reading an `@` mention, which notifies, HTML
+ * such as `<!--`, which can hide the rest of the comment, or a character reference such as `&#64;`,
+ * which writes either. It shows nothing, where a backslash or `&lt;` would show inside a code span.
+ */
+const inertText = (text: string): string =>
+  text.replaceAll(/[@<&]/gu, (character) => `${character}\u200D`);
+
+/**
+ * `text` as a Markdown code span. Its fence is one backtick longer than the longest run of
+ * backticks in it, a space pads it where it starts or ends with a backtick or a space, and each
+ * line break is a space, as a code span shows it anyway, so the span stays on its line.
+ */
+const codeSpan = (text: string): string => {
+  const line = text.replaceAll(/\r\n?|\n/gu, " ");
+
+  const longestRun = Math.max(
+    0,
+    ...(line.match(/`+/gu) ?? []).map((run) => run.length)
+  );
+
+  const fence = "`".repeat(longestRun + 1);
+  const padding = /^[` ]|[` ]$/u.test(line) ? " " : "";
+
+  return `${fence}${padding}${line}${padding}${fence}`;
+};
+
+/** A table cell's Markdown, with each `|` escaped so it does not end the cell, in a code span too. */
+const tableCell = (markdown: string): string => markdown.replaceAll("|", "\\|");
+
 const findingLocation = (finding: SemgrepFinding): string =>
   `${finding.path}:${finding.start.line}`;
 
@@ -93,21 +124,20 @@ const formatFindingRow = (
   revision: Revision
 ): string => {
   const doc = findingDocLink(finding);
+  const rule = codeSpan(finding.check_id);
+  const ruleCell = doc ? `[${rule}](${doc})` : rule;
+  const locationCell = `[${codeSpan(findingLocation(finding))}](${findingCodeUrl(finding, revision)})`;
+  const cells = [inertText(finding.extra.severity), ruleCell, locationCell];
 
-  const ruleCell = doc
-    ? `[\`${finding.check_id}\`](${doc})`
-    : `\`${finding.check_id}\``;
-
-  const locationCell = `[\`${findingLocation(finding)}\`](${findingCodeUrl(finding, revision)})`;
-
-  return `| ${finding.extra.severity} | ${ruleCell} | ${locationCell} |`;
+  return `| ${cells.map(tableCell).join(" | ")} |`;
 };
 
 const formatFindingDetails = (finding: SemgrepFinding): string => {
   const doc = findingDocLink(finding);
   const docLine = doc ? `\n\nRule link: ${doc}` : "";
+  const heading = `### ${codeSpan(finding.check_id)} — ${codeSpan(findingLocation(finding))}`;
 
-  return `### \`${finding.check_id}\` — \`${findingLocation(finding)}\`\n\n${finding.extra.message.trim()}${docLine}\n\nFingerprint: \`${semgrepFingerprint(finding)}\``;
+  return `${heading}\n\n${inertText(finding.extra.message.trim())}${docLine}\n\nFingerprint: \`${semgrepFingerprint(finding)}\``;
 };
 
 const TABLE_HEADER = "| Severity | Rule | Location |\n| --- | --- | --- |\n";
