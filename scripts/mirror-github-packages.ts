@@ -42,7 +42,7 @@ const packument = async (
   token?: string
 ): Promise<Packument | undefined> => {
   const { ok, status, body } = await request(
-    `${registry}/${name.replace("/", "%2f")}`,
+    `${registry}/${name.replaceAll("/", "%2f")}`,
     {
       headers: {
         accept: "application/json",
@@ -175,7 +175,7 @@ try {
 
         const file = path.join(
           work,
-          `${name.replace("/", "+")}-${version}.tgz`
+          `${name.replaceAll("/", "+")}-${version}.tgz`
         );
 
         // oxlint-disable-next-line eslint/no-await-in-loop -- copies go in order: a later one takes back a tag an earlier one set
