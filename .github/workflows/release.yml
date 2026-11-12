@@ -18,6 +18,9 @@ jobs:
     if: github.repository == 'rivi-software/tools'
     # npm trusted publishing needs a GitHub-hosted runner.
     runs-on: ubuntu-24.04
+    # A run takes about two minutes, most of them Verify. A stuck one would hold every later
+    # release behind it in the release concurrency group.
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write # npm trusted publishing and provenance
@@ -75,6 +78,9 @@ jobs:
     # whatever that release did publish.
     if: ${{ !cancelled() && github.repository == 'rivi-software/tools' }}
     runs-on: ubuntu-24.04
+    # A run takes seconds. Each request to a registry gives up after three tries of 30 seconds
+    # (scripts/registry-request.ts), and this stops a run where many of them do.
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write # publish to GitHub Packages
