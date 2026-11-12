@@ -164,6 +164,24 @@ The other workflows run on GitHub Actions, from `.github/workflows/`, because De
 - [`issue-labels.yml`](.github/workflows/issue-labels.yml) and [`oss-project.yml`](.github/workflows/oss-project.yml) run when an issue opens, an event Depot CI does not take.
 - [`rivi-bot-bun.yml`](.github/workflows/rivi-bot-bun.yml) checks the Bun that rivi-bot's actions install on GitHub's runners, where those actions run in every repository that calls them. It runs only when a pull request or a push changes `rivi-bot/`.
 
+#### A pull request without CI checks
+
+A pull request from a branch here that shows no `CI /` checks at all, `CI / verify` included, most likely has a Depot CI run that failed before any job started. Depot CI starts a pull request's run from GitHub's merge ref, `refs/pull/<number>/merge`. When that ref is still the merge of an earlier commit, Depot CI retries for a few minutes, then fails the run and reports nothing to GitHub. `depot ci rerun` does not help, because a rerun does not rebuild the run. A fork's pull request has no run at all: see [Pull requests from forks](#pull-requests-from-forks).
+
+1. **Find the run.** `depot ci workflow list --repo rivi-software/tools --pr <number>` lists it as `(unnamed)` and `failed`. `depot ci status <run id>` gives its error, which starts with `Merge ref refs/pull/<number>/merge is stale`.
+
+2. **Wait for the merge ref.** GitHub builds it in the background. It is current when its second parent is the pull request's head commit. While it is not, a new commit fails in the same way.
+
+   ```bash
+   gh pr view <number> --json headRefOid --jq .headRefOid
+   git fetch origin "pull/<number>/merge" && git log -1 --format=%P FETCH_HEAD
+   ```
+
+3. **Push a new commit.** As the error says, a new commit starts a new run.
+   - On a branch of a maintainer, push an empty commit, such as `git commit --allow-empty -m "ci: run CI again on Depot CI"`.
+   - On a pull request from Dependabot, comment `@dependabot recreate`.
+   - The release workflow rewrites the "Version packages" pull request, from `changeset-release/main`, on the next push to `main`.
+
 ### Pull requests from forks
 
 - **Secrets.** No workflow runs a fork's code with secrets. A workflow on `pull_request_target` has them, so it must not check out the pull request and run it; [rivi-bot's](.github/workflows/rivi-bot.yml) never runs the code it checks out, and [the labeler](.github/workflows/pr-labels.yml) checks out nothing.
