@@ -12,7 +12,7 @@
  *   (`followNewBuild`), after the app's unsaved-work guards have run; a notice can offer the
  *   reload (`useNewBuildNotice` in `./react`), and once dismissed waits for a later build; and an
  *   error screen that caught a missing chunk reloads onto the new build instead of showing
- *   (`recoverFromChunkError`).
+ *   (`recoverFromChunkError`), once the tab has stored the loop guard that stops a reload loop.
  * - `/build.json` also carries the browser code's fingerprint and each named module's. A deploy
  *   that leaves the page's browser code as it was is not new to the tab, and a notice for a
  *   module waits until a deploy changes that module (`isModuleChanged`).
@@ -410,16 +410,40 @@ export const createDeployWatch = ({
     }
   };
 
-  /** Moves the tab onto the live build: `href` as a whole page, or this page again. */
-  const reload = (href?: string) => {
-    if (reloading || !live) {
-      return;
+  /**
+   * Moves the tab onto the live build, `href` as a whole page or this page again, after writing
+   * the loop guard; whether the tab is reloading. Where the browser refuses storage, a reload the
+   * user asked for (`byUser`) still happens and only the guard is lost, since each reload in a
+   * loop would take a click. One nobody asked for does not happen: a host that serves the old page
+   * again would loop it.
+   */
+  const startReload = ({
+    href,
+    byUser = false,
+  }: {
+    href?: string;
+    byUser?: boolean;
+  } = {}): boolean => {
+    if (reloading) {
+      return true;
+    }
+
+    if (!live || !(remember(RELOADED_FOR_KEY, live.id) || byUser)) {
+      return false;
     }
 
     setReloading(true);
-    // Without storage the reload still happens; only the loop guard is lost.
-    remember(RELOADED_FOR_KEY, live.id);
     load(href);
+
+    return true;
+  };
+
+  /**
+   * Moves the tab onto the live build: `href` as a whole page, or this page again. The user asked
+   * for it, from the notice or by moving to another page, so it happens without storage too.
+   */
+  const reload = (href?: string) => {
+    startReload({ href, byUser: true });
   };
 
   /**
@@ -507,7 +531,8 @@ export const createDeployWatch = ({
     },
     /**
      * For an error screen: true when `error` is a chunk that did not load and the tab is reloading,
-     * onto the new build or, once per build within `LOOP_GUARD_MS`, onto its own.
+     * onto the new build or, once per build within `LOOP_GUARD_MS`, onto its own. Either reload
+     * needs its loop guard written; without storage, the error is the screen's.
      */
     // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the value an error screen caught, which no schema describes
     async recover(error: unknown): Promise<boolean> {
@@ -516,9 +541,7 @@ export const createDeployWatch = ({
       }
 
       if (await check({ force: true })) {
-        reload();
-
-        return true;
+        return startReload();
       }
 
       if (reloading) {
@@ -828,7 +851,8 @@ export const subscribeToReload = (listener: () => void): (() => void) =>
  * For an error screen: resolves true when `error` is a chunk that did not load and the page is
  * reloading (show nothing): onto the newer build that replaced the page's, or, the first time a
  * chunk of the live build fails in this tab within `LOOP_GUARD_MS`, onto that build again. False
- * when the screen should show.
+ * when the screen should show, which includes a tab whose session storage refuses the loop guard:
+ * nothing would stop a reload loop there.
  */
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the value an error screen caught, which no schema describes
 export const recoverFromChunkError = async (error: unknown): Promise<boolean> =>

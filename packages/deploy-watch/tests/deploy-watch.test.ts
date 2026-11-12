@@ -9,7 +9,11 @@ import {
   parseBuildFile,
   RELOADED_FOR_KEY,
 } from "../src/index.js";
-import type { BuildFile, NavigationEvent } from "../src/index.js";
+import type {
+  BuildFile,
+  DeployWatchDeps,
+  NavigationEvent,
+} from "../src/index.js";
 
 const memoryStorage = (entries: Record<string, string> = {}) => {
   const values = new Map(Object.entries(entries));
@@ -138,6 +142,39 @@ const afterADeploy = async (own: Answer) => {
     fetches: state.fetches,
     ownFetches: state.ownFetches,
   };
+};
+
+/**
+ * What a tab replaced by build `b`, with `storage` as its session storage, does for an error
+ * screen's missing chunk, and then for a reload the user asks for at a move to another page.
+ */
+const replacedWithStorage = async (storage: DeployWatchDeps["storage"]) => {
+  const loads: (string | undefined)[] = [];
+
+  const watch = createDeployWatch({
+    current: "a",
+    fetchLive: answering({ id: "b" }),
+    now: () => 0,
+    storage,
+    load: (href) => {
+      loads.push(href);
+    },
+  });
+
+  const recovers = await watch.recover(CHUNK);
+
+  const forTheError = {
+    recovers,
+    reloading: watch.isReloading(),
+    loads: [...loads],
+  };
+
+  watch.beforeNavigate(
+    { subscribe: () => () => {}, history: {} },
+    { fromLocation: {}, pathChanged: true }
+  );
+
+  return { forTheError, loadsAtTheMove: loads };
 };
 
 describe(createDeployWatch, () => {
@@ -430,6 +467,30 @@ describe(createDeployWatch, () => {
 
     await expect(unstored.recover(CHUNK)).resolves.toBeFalsy();
     expect(unstored.isReloading()).toBeFalsy();
+  });
+
+  it("with no storage to guard the loop, an error screen does not reload onto a newer build; the user still can", async () => {
+    // A host that serves the old page after the assets moved on brings the error back with every
+    // reload, and nothing in the tab would remember the last one. The screen shows instead; the
+    // user's own move to another page still reloads.
+    const screenShows = {
+      forTheError: { recovers: false, reloading: false, loads: [] },
+      loadsAtTheMove: [undefined],
+    };
+
+    await expect(replacedWithStorage(null)).resolves.toStrictEqual(screenShows);
+    // Storage the browser hands over but refuses to write to (a full quota, blocked site data).
+    await expect(
+      replacedWithStorage({
+        getItem: () => null,
+        setItem: () => {
+          throw new DOMException(
+            "The quota has been exceeded.",
+            "QuotaExceededError"
+          );
+        },
+      })
+    ).resolves.toStrictEqual(screenShows);
   });
 
   it("a deploy that leaves the page's browser code as it was is not new, once the tab knows it", async () => {
