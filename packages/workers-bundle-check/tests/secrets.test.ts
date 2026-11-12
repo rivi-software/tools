@@ -46,6 +46,13 @@ const SAMPLES = {
   "Shopify access token": join("sh", "pat_", "0123456789abcdef".repeat(2)),
   "Linear API key": join("li", "n_api_", alnum(40)),
   "Hugging Face token": join("h", "f_", alnum(34)),
+  "Cloudflare API credential": join("cf", "ut_", alnum(40), "3f9a0c7e"),
+  "Cloudflare Access service token secret": join(
+    "cf",
+    "ast_",
+    alnum(40),
+    "3f9a0c7e"
+  ),
 } satisfies Record<string, string>;
 
 describe("the secret patterns", () => {
@@ -81,6 +88,38 @@ describe("the secret patterns", () => {
       // ends in sk_test_ inside a word
       "task_test_abcdefghijklmnopqrstuvwxyz",
       "xoxo-and-goodbye-to-everyone",
+    ].join("\n");
+
+    expect(findSecrets(code, SECRET_PATTERNS)).toStrictEqual([]);
+  });
+
+  it.for(["k", "ut", "at"])(
+    "finds a Cloudflare API credential that starts cf%s_",
+    (kind) => {
+      const value = join("cf", kind, "_", alnum(40), "3f9a0c7e");
+      expect(
+        findSecrets(`const t=${JSON.stringify(value)};`, SECRET_PATTERNS).map(
+          ({ name }) => name
+        )
+      ).toStrictEqual(["Cloudflare API credential"]);
+    }
+  );
+
+  it("passes what is a character off a Cloudflare credential", () => {
+    const checksum = "3f9a0c7e";
+
+    const code = [
+      // prefixes Cloudflare does not issue
+      join("cf", "x_", alnum(40), checksum),
+      join("cf", "as_", alnum(40), checksum),
+      // a body a character short, or a character long
+      join("cf", "ut_", alnum(39), checksum),
+      join("cf", "ast_", alnum(39), checksum),
+      join("cf", "at_", alnum(41), checksum),
+      // a checksum that is not hexadecimal
+      join("cf", "k_", alnum(40), "3f9a0c7z"),
+      // the prefix inside a word
+      join("x", "cf", "ut_", alnum(40), checksum),
     ].join("\n");
 
     expect(findSecrets(code, SECRET_PATTERNS)).toStrictEqual([]);

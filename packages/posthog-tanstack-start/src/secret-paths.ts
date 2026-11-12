@@ -141,27 +141,52 @@ export const pathRedactor = (patterns: readonly string[]): PathRedactor => {
   };
 };
 
-/** `value` with `redact` applied to every string in it, object keys included (heatmaps key their data by URL). */
-export const redactDeep = <T>(value: T, redact: PathRedactor): T => {
+// What an object or array that holds itself holds there instead, as posthog-node's JSON writes a cycle.
+const CIRCULAR = "[Circular]";
+
+/**
+ * `value` with `redact` applied to every string in it. `path` holds the arrays and objects that contain `value`, so a
+ * reference back to one of them ends the walk, and one that only appears twice is redacted in both places.
+ */
+const redactWithin = <T>(
+  value: T,
+  redact: PathRedactor,
+  path: Set<object>
+): T => {
   if (isString(value)) {
     // SAFETY: `redact` answers a string for a string, so the result is the same `T` that came in.
     return redact(value) as T;
   }
 
-  if (Array.isArray(value)) {
-    // SAFETY: an array of redacted items is the same array type as the one that came in.
-    return value.map((item) => redactDeep(item, redact)) as T;
+  if (!Array.isArray(value) && !isPlainObject(value)) {
+    return value;
   }
 
-  if (isPlainObject(value)) {
-    // SAFETY: a plain object with every key and item redacted keeps the shape it came in with.
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        redact(key),
-        redactDeep(item, redact),
-      ])
-    ) as T;
+  if (path.has(value)) {
+    // SAFETY: a cycle is the one place the shape changes; JSON cannot write it, and the SDK would write this string.
+    return CIRCULAR as T;
   }
 
-  return value;
+  path.add(value);
+
+  const redacted = Array.isArray(value)
+    ? value.map((item) => redactWithin(item, redact, path))
+    : Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          redact(key),
+          redactWithin(item, redact, path),
+        ])
+      );
+
+  path.delete(value);
+
+  // SAFETY: an array or a plain object with every key and item redacted keeps the shape it came in with.
+  return redacted as T;
 };
+
+/**
+ * `value` with `redact` applied to every string in it, object keys included (heatmaps key their data by URL). An
+ * object or array that holds itself holds `"[Circular]"` there instead, so an event with a cycle still goes.
+ */
+export const redactDeep = <T>(value: T, redact: PathRedactor): T =>
+  redactWithin(value, redact, new Set());

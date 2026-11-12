@@ -1,9 +1,10 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { PostHog } from "posthog-node";
+import type { BeforeSendFn } from "posthog-node";
 
 import { isString } from "./guards.js";
 import { POSTHOG_MISSING } from "./missing.js";
-import { pathRedactor } from "./secret-paths.js";
+import { pathRedactor, redactDeep } from "./secret-paths.js";
 import type { PathRedactor } from "./secret-paths.js";
 
 /** What the browser's own SDK says about who is asking, read from the request. */
@@ -13,16 +14,34 @@ interface BrowserIdentity {
 }
 
 let client: PostHog | null | undefined;
-let redactPath: PathRedactor = (text) => text;
+
+// Null until the app lists its secret paths: an app without them sends every event as it is, unwalked.
+let redactPath: PathRedactor | null = null;
 
 /**
- * The app's routes whose address is a credential (a shared ticket's page `/t/$token`), which an exception reports by
- * their pattern. Called once from the Worker's entry module, so it holds for every handler and Durable Object.
+ * The app's routes whose address is a credential (a shared ticket's page `/t/$token`), which everything the Worker
+ * sends reports by their pattern: an exception's URL, message and stack, and the properties of every exception and
+ * event. Called once from the Worker's entry module, so it holds for every handler and Durable Object.
  * Throws for a pattern the router would read differently, such as `prefix$id`.
  */
 export const setSecretPaths = (patterns: readonly string[]) => {
-  redactPath = pathRedactor(patterns);
+  redactPath = patterns.length > 0 ? pathRedactor(patterns) : null;
 };
+
+/** `pathname` with its secret paths as their pattern. */
+const redactPathname = (pathname: string) =>
+  redactPath ? redactPath(pathname) : pathname;
+
+/**
+ * An event's text is whatever the code behind it wrote (a handler's ``new Error(`${request.url} not found`)``, a fetch
+ * error's address, a property that quotes a link), so every string of the event posthog-node builds leaves with the
+ * secret paths as their pattern, as the browser's `redactSecretPaths` does. It reads `redactPath` as it sends, so a
+ * `setSecretPaths` after the client exists still holds.
+ */
+const redactEvent: BeforeSendFn = (event) =>
+  redactPath
+    ? { ...event, properties: redactDeep(event.properties, redactPath) }
+    : event;
 
 /**
  * The server-side PostHog client (posthog-node resolves to its workerd build), or null when the Worker's
@@ -37,6 +56,7 @@ const posthogServer = (): PostHog | null => {
         host: env.POSTHOG_HOST,
         flushAt: 1,
         flushInterval: 0,
+        before_send: redactEvent,
       });
     } else {
       if (import.meta.env?.DEV && import.meta.env.MODE !== "test") {
@@ -134,7 +154,8 @@ const browserIdentity = (request: Request): BrowserIdentity => {
 
 /**
  * Send one event without blocking the response. Without a distinctId the event is anonymous (no person profile)
- * under `anonymousId`, so related events (one conversation's AI calls) still share an id.
+ * under `anonymousId`, so related events (one conversation's AI calls) still share an id. Its properties leave with
+ * the secret paths (`setSecretPaths`) as their pattern.
  */
 export const captureServerEvent = (
   event: string,
@@ -196,8 +217,8 @@ export const captureServerException = (
   const properties = {
     ...(url &&
       request && {
-        $current_url: url.origin + redactPath(url.pathname),
-        $pathname: redactPath(url.pathname),
+        $current_url: url.origin + redactPathname(url.pathname),
+        $pathname: redactPathname(url.pathname),
         request_method: request.method,
       }),
     ...(sessionId && { $session_id: sessionId }),

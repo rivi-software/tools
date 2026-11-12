@@ -4,6 +4,13 @@ import { describe, expect, it } from "vitest";
 import { redactSecretPaths } from "../src/browser.js";
 import { pathRedactor, redactDeep } from "../src/secret-paths.js";
 
+/** An object that holds itself, which `JSON.stringify` cannot write. */
+interface Loop {
+  page: string;
+  self?: Loop;
+  pages?: Loop[];
+}
+
 const redact = pathRedactor(["/t/$token", "/q/$token", "/u/$token"]);
 
 const event = (overrides: Partial<CaptureResult>): CaptureResult => ({
@@ -143,6 +150,20 @@ describe(redactDeep, () => {
       when,
       ok: true,
       none: null,
+    });
+  });
+
+  it("ends a cycle as posthog-node writes one, and redacts an object each place it appears", () => {
+    const loop: Loop = { page: "/t/aaa" };
+    loop.self = loop;
+    loop.pages = [loop];
+    const shared = { page: "/q/bbb" };
+    expect(
+      redactDeep({ loop, first: shared, second: shared }, redact)
+    ).toStrictEqual({
+      loop: { page: "/t/$token", self: "[Circular]", pages: ["[Circular]"] },
+      first: { page: "/q/$token" },
+      second: { page: "/q/$token" },
     });
   });
 });

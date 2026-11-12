@@ -161,6 +161,8 @@ The check looks for these key formats in two places:
 | Shopify access token | `shpat_…`, `shpca_…`, `shppa_…`, `shpss_…` |
 | Linear API key | `lin_api_…` |
 | Hugging Face token | `hf_…` |
+| Cloudflare API credential | `cfk_…` (Global API key), `cfut_…` (user API token), `cfat_…` (account API token) |
+| Cloudflare Access service token secret | `cfast_…` |
 
 Keys that apps ship to browsers on purpose are not in the list: Stripe's publishable `pk_` keys, PostHog's `phc_` project tokens, Supabase's publishable keys, and Google's `AIza` API keys. Add other formats with `secretPatterns`:
 
@@ -188,6 +190,7 @@ allowedSecrets: [
 - **Which modules the Worker holds.** It reads every `.js`, `.mjs` and `.cjs` file in `serverDir` with its source map. It uses the map the file's `sourceMappingURL` names, inline or in a file, or else `<file>.map` beside it, which is where Vite's `hidden` maps are. A module counts when its mappings cover code in the file. A module the bundler tree-shook away is not in the map, or maps only to the call that initialized it (`init_x()`), which the check leaves out. The size it reports is the length of the module's code in the file.
 - **Module paths.** It resolves each source from the map's directory and `sourceRoot`, and names it by its real path, as bundlers do. A package that pnpm links into `node_modules` is named by its path in pnpm's store. Wrangler writes a `sourceRoot` that its own sources do not use. When no file is where `sourceRoot` points, the check looks for the source without it.
 - **Matching `.assetsignore`.** It builds the matcher Wrangler builds in `createAssetsIgnoreFunction` (workers-sdk, `packages/workers-shared/utils/helpers.ts`), and tests each file's path in the assets directory against it. The tests compare its result with what `wrangler deploy --dry-run` leaves out, for a dozen `.assetsignore` files.
+- **Symbolic links.** It follows them as Wrangler does. In the assets directory, a link to a file is served as that file, and a link to a directory serves the files in it, under the link's path (Wrangler's `buildAssetManifest`). In `serverDir`, a link to a file is read as that file, and a link to a directory is not followed (Wrangler's walk for a Worker's modules). A link to nothing is passed over. A report names a linked file by its path in the assets or in `serverDir`, the one `.assetsignore` matches.
 
 ## Limits
 
@@ -196,7 +199,7 @@ allowedSecrets: [
 - **Rules check the Worker.** The browser's code in `assetsDir` is checked for source maps and secrets only.
 - **Installed is not imported.** In a monorepo, a package installed in the root counts for the stale check even when this app does not depend on it.
 - **Yarn Plug'n'Play.** Its packages sit in zip files, which the stale check cannot see into, so it calls a package rule stale unless the Worker holds the package.
-- **Secrets have to have a shape.** A key without a prefix, such as an AWS secret access key, a Cloudflare API token or a password, has no shape to find. Neither does a value that the build encodes or splits. The check complements a secret scanner on the source, and does not replace it.
+- **Secrets have to have a shape.** A key without a prefix, such as an AWS secret access key, a Cloudflare credential in the format from before the `cf…_` prefixes, or a password, has no shape to find. Neither does a value that the build encodes or splits. The check complements a secret scanner on the source, and does not replace it.
 - **`assetsDir` is not read from the Wrangler config.** Pass it, or the assets are not checked at all.
 
 ## Exports
@@ -231,7 +234,7 @@ The tests in `tests/` cover:
 - reading source maps: the mappings, a dropped module's residue, hidden and inline maps, and Wrangler's `sourceRoot`
 - matching package names, globs and regular expressions against npm's and pnpm's layouts
 - the walk over a monorepo's files, through symlinks
-- the agreement with `wrangler deploy --dry-run` on which assets `.assetsignore` leaves out
+- the agreement with `wrangler deploy --dry-run` on which assets `.assetsignore` leaves out, and on which assets it serves through symbolic links
 - each secret pattern, and keys meant to be public
 - the whole check on Workers built with Vite (Rolldown) and with Wrangler (esbuild)
 - the command and its configuration files

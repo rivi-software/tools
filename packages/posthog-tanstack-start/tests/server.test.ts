@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   captureServerEvent,
@@ -20,6 +20,12 @@ type Sent =
       properties?: unknown;
     };
 
+/** A property that holds itself, which `JSON.stringify` cannot write. */
+interface Loop {
+  page: string;
+  self?: Loop;
+}
+
 const sent: Sent[] = [];
 
 const record = () => {
@@ -37,11 +43,34 @@ const record = () => {
   });
 };
 
+/**
+ * posthog-node's own client, which builds each event and runs `before_send`, from a fresh module: one with no client
+ * yet, so it makes the real one from the Worker's vars. `bodies` holds each request body as PostHog would get it.
+ */
+const realClient = async () => {
+  const bodies: string[] = [];
+  vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+    const gzipped = new Response(init.body).body;
+    bodies.push(
+      await new Response(
+        gzipped?.pipeThrough(new DecompressionStream("gzip"))
+      ).text()
+    );
+
+    return Response.json({ status: 1 });
+  });
+  vi.resetModules();
+  const server = await import("../src/server.js");
+
+  return { server, bodies };
+};
+
 describe("the Worker's PostHog client", () => {
   afterEach(() => {
     sent.length = 0;
     installPostHogForTests(null);
     setSecretPaths([]);
+    vi.unstubAllGlobals();
   });
 
   describe(captureServerException, () => {
@@ -106,6 +135,47 @@ describe("the Worker's PostHog client", () => {
       expect(() => setSecretPaths(["/files/$/edit"])).toThrow(
         'Secret path "/files/$/edit" goes on after its splat'
       );
+    });
+
+    it("sends a secret page's address in the exception's message, stack and properties as the route's pattern", async () => {
+      const { server, bodies } = await realClient();
+      server.setSecretPaths(["/t/$token"]);
+
+      const request = new Request("https://app.example.com/t/k3y0f4t1ck3t");
+      const error = new Error(`ticket ${request.url} not found`);
+      // PostHog gets the stack as frames; this one ran from under the secret page.
+      error.stack = `Error: ${error.message}\n    at loadTicket (${request.url}/ticket.js:3:9)`;
+      server.captureServerException(error, {
+        request,
+        properties: { link: request.url },
+      });
+
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      expect(JSON.parse(bodies[0] ?? "")).toMatchObject({
+        batch: [
+          {
+            event: "$exception",
+            properties: {
+              $exception_list: [
+                {
+                  value: "ticket https://app.example.com/t/$token not found",
+                  stacktrace: {
+                    frames: [
+                      {
+                        function: "loadTicket",
+                        filename: "https://app.example.com/t/$token/ticket.js",
+                      },
+                    ],
+                  },
+                },
+              ],
+              $current_url: "https://app.example.com/t/$token",
+              link: "https://app.example.com/t/$token",
+            },
+          },
+        ],
+      });
+      expect(bodies[0]).not.toMatch(/k3y/u);
     });
 
     it("reads the person and session from the SDK's cookie on a page load", () => {
@@ -218,6 +288,68 @@ describe("the Worker's PostHog client", () => {
           properties: { $ai_model: "m", $process_person_profile: false },
         },
       ]);
+    });
+
+    it("sends a secret page's address in an event's properties as the route's pattern", async () => {
+      const { server, bodies } = await realClient();
+      server.setSecretPaths(["/t/$token"]);
+      server.captureServerEvent("ticket_shared", "usr_1", {
+        link: "https://app.example.com/t/k3y0f4t1ck3t",
+        recipients: [{ page: "/t/k3y0f4t1ck3t/confirm" }],
+      });
+
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      expect(JSON.parse(bodies[0] ?? "")).toMatchObject({
+        batch: [
+          {
+            event: "ticket_shared",
+            properties: {
+              link: "https://app.example.com/t/$token",
+              recipients: [{ page: "/t/$token/confirm" }],
+            },
+          },
+        ],
+      });
+      expect(bodies[0]).not.toMatch(/k3y/u);
+    });
+
+    it("sends an event as it is while no secret paths are set", async () => {
+      const { server, bodies } = await realClient();
+      // Nothing walks the properties, so one that holds itself still goes, as posthog-node writes it.
+      const loop: Loop = { page: "/t/k3y0f4t1ck3t" };
+      loop.self = loop;
+      server.captureServerEvent("ticket_viewed", "usr_1", { loop });
+
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      expect(JSON.parse(bodies[0] ?? "")).toMatchObject({
+        batch: [
+          {
+            event: "ticket_viewed",
+            properties: {
+              loop: { page: "/t/k3y0f4t1ck3t", self: "[Circular]" },
+            },
+          },
+        ],
+      });
+    });
+
+    it("sends an event whose property holds itself with the secret paths as their pattern", async () => {
+      const { server, bodies } = await realClient();
+      server.setSecretPaths(["/t/$token"]);
+      const loop: Loop = { page: "/t/k3y0f4t1ck3t" };
+      loop.self = loop;
+      server.captureServerEvent("ticket_viewed", "usr_1", { loop });
+
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      expect(JSON.parse(bodies[0] ?? "")).toMatchObject({
+        batch: [
+          {
+            event: "ticket_viewed",
+            properties: { loop: { page: "/t/$token", self: "[Circular]" } },
+          },
+        ],
+      });
+      expect(bodies[0]).not.toMatch(/k3y/u);
     });
   });
 });

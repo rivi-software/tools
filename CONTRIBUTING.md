@@ -213,6 +213,31 @@ npm adds a trusted publisher only to a package that already exists, so a maintai
 4. Re-run the failed release workflow. It finds the version on npm and passes, and its next job copies the version to GitHub Packages.
 5. Make the package public on GitHub Packages, which creates every new package private whatever the repository's visibility: in the organization's **Packages**, open the package, then **Package settings → Danger Zone → Change visibility → Public**. There is no API for it, and a public package cannot be made private again.
 
+#### A rivi-bot release
+
+rivi-bot has no changesets and no npm package. A version is a `rivi-bot-v<major>.<minor>.<patch>` tag on `main`, with a GitHub release. It matters to a repository that pins the actions themselves: the reusable workflow runs them from `main`, so its callers get every change as soon as it merges.
+
+A maintainer cuts a release by hand once a change to `rivi-bot/` or the reusable workflow has merged that callers who pin should get:
+
+- **Major** for a change a caller has to act on, such as an input or output removed or renamed, or a default that changes what runs.
+- **Minor** for something new: an action, an input or a behaviour.
+- **Patch** for a fix. A security fix gets its tag as soon as it merges, and its advisory names that version as patched.
+
+1. Wait for CI to pass on the commit. A tag is never moved, so it has to point at the right one.
+2. List what changed since the last release:
+
+   ```bash
+   git fetch origin main --tags
+   git log --oneline "$(git describe --tags --abbrev=0 --match 'rivi-bot-v*' origin/main)..origin/main" -- rivi-bot .github/workflows/rivi-bot.yml
+   ```
+
+3. Write the notes for the people who run rivi-bot, under the headings that apply: Security, Changes, and Upgrading for what a caller has to do. [rivi-bot-v1.0.0](https://github.com/rivi-software/tools/releases/tag/rivi-bot-v1.0.0) shows the shape.
+4. Create the tag and the release on that commit:
+
+   ```bash
+   gh release create rivi-bot-v<version> --target <commit sha> --title rivi-bot-v<version> --notes-file notes.md
+   ```
+
 ### Rulesets
 
 GitHub enforces the repository's rulesets; [`.github/rulesets/`](.github/rulesets) holds them and is their source of truth.
