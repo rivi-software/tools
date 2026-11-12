@@ -6,7 +6,7 @@ body:
     id: package
     attributes:
       label: Package
-      description: The package it is for, or "a new package".
+      description: The package it is for, rivi-bot, or "a new package".
       placeholder: "@rivi-software/deploy-watch"
     validations:
       required: true
