@@ -232,6 +232,41 @@ describe("formatFindingsComment with text from the scanned code", () => {
     expect(comment).not.toMatch(/@\w|&#/u);
   });
 
+  it("leaves links, email addresses and text that is not markup as written", () => {
+    const message =
+      "See https://example.com/search?q=x&lang=en, (https://www.npmjs.com/package/@scope/pkg) " +
+      "and [the docs](https://example.com/?a=1&b=2), or write to security@example.com. " +
+      "Use `a && b`, not a < b.";
+
+    expect(formatFindingsComment([findingSaying(message)], revision)).toContain(
+      `\n\n${message}\n\n`
+    );
+  });
+
+  it("keeps a mention that only looks as if it were in a link from notifying anyone", () => {
+    const comment = formatFindingsComment(
+      [
+        findingSaying(
+          "a/@someone, `(https://example.com/`@someone, [(https://example.com/](x)@someone, https://exa_mple.com/@someone"
+        ),
+      ],
+      revision
+    );
+
+    expect(comment).not.toMatch(/@\w/u);
+  });
+
+  it("keeps a code fence in a message from turning the rest of the comment into code", () => {
+    const comment = formatFindingsComment(
+      [findingSaying("Matched:\n```js\nnever closed\n   ~~~")],
+      revision
+    );
+
+    expect(comment).toContain(
+      `\n\nMatched:\n${ZERO_WIDTH_JOINER}\`\`\`js\nnever closed\n   ${ZERO_WIDTH_JOINER}~~~\n\n`
+    );
+  });
+
   it("shows an unclosed <!-- in a message as text, so it hides nothing after it", () => {
     const comment = formatFindingsComment(
       [

@@ -72,14 +72,48 @@ export const semgrepFingerprint = (finding: SemgrepFinding): string => {
   return createHash("sha256").update(payload).digest("hex").slice(0, 40);
 };
 
+/** U+200D. GitHub shows nothing for it, and reads no mention, HTML or code fence across it. */
+const ZERO_WIDTH_JOINER = "\u200D";
+
 /**
- * `text` as Markdown that shows it as written, inside a code span or out of one: a zero-width
- * joiner after each `@`, `<` and `&` keeps GitHub from reading an `@` mention, which notifies, HTML
- * such as `<!--`, which can hide the rest of the comment, or a character reference such as `&#64;`,
- * which writes either. It shows nothing, where a backslash or `&lt;` would show inside a code span.
+ * An `http` or `https` address that GitHub links by itself, so an `@` in it is part of the link
+ * and mentions nobody: after the start, whitespace or `(`, with a domain of dotted ASCII labels.
+ * Its path stops before a backtick, `]`, `)` or `|`, which could close a code span, a link or a
+ * table cell that opened before the address and leave the rest of it outside the link. The group
+ * makes `split` keep the addresses.
+ */
+const LINKED_URL =
+  /(?<url>(?<=^|[\t\n\r (])https?:\/\/[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?(?:\.[A-Za-z\d](?:[A-Za-z\d-]*[A-Za-z\d])?)+(?:[:/?#][\w!#%&'*+,./:;=?@~-]*)?)/u;
+
+/** An `@` GitHub reads as a mention: not after an ASCII letter or digit, and before one. */
+const MENTION = /(?<![A-Za-z\d])@(?=[A-Za-z\d])/gu;
+
+/** A `<` that opens HTML, or an `&` that opens a character reference such as `&#64;`. */
+const MARKUP = /<(?=[A-Za-z!/?])|&(?=#|[A-Za-z][A-Za-z\d]*;)/gu;
+
+/** A line's ``` or `~~~`, whose code block runs on to the end of the comment if it never closes. */
+const CODE_FENCE = /^(?<indent> {0,3})(?=```|~~~)/gmu;
+
+const joinAfter = (text: string, pattern: RegExp): string =>
+  text.replaceAll(pattern, (match) => `${match}${ZERO_WIDTH_JOINER}`);
+
+/**
+ * `text` as Markdown that GitHub shows as written, inside a code span or out of one. A zero-width
+ * joiner goes after each `@` that would mention someone, which notifies them, outside an address
+ * GitHub links; after each `<` that would open HTML such as `<!--`, which can hide the rest of the
+ * comment; after each `&` that would open a character reference such as `&#64;`, which writes
+ * either; and before a line's ``` or `~~~`. Links and email addresses keep working, and the joiner
+ * shows nothing, where a backslash or `&lt;` would show inside a code span.
  */
 const inertText = (text: string): string =>
-  text.replaceAll(/[@<&]/gu, (character) => `${character}\u200D`);
+  text
+    .split(LINKED_URL)
+    .map((part, index) =>
+      // `split` puts the addresses at the odd indexes.
+      joinAfter(index % 2 === 0 ? joinAfter(part, MENTION) : part, MARKUP)
+    )
+    .join("")
+    .replaceAll(CODE_FENCE, `$<indent>${ZERO_WIDTH_JOINER}`);
 
 /**
  * `text` as a Markdown code span. Its fence is one backtick longer than the longest run of
