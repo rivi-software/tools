@@ -18,6 +18,7 @@ let redactPath: PathRedactor = (text) => text;
 /**
  * The app's routes whose address is a credential (a shared ticket's page `/t/$token`), which an exception reports by
  * their pattern. Called once from the Worker's entry module, so it holds for every handler and Durable Object.
+ * Throws for a pattern the router would read differently, such as `prefix$id`.
  */
 export const setSecretPaths = (patterns: readonly string[]) => {
   redactPath = pathRedactor(patterns);

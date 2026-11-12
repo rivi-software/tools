@@ -102,6 +102,12 @@ describe("the Worker's PostHog client", () => {
       expect(JSON.stringify(sent)).not.toMatch(/k3y/u);
     });
 
+    it("throws at setup for a secret path the router reads differently", () => {
+      expect(() => setSecretPaths(["/files/$/edit"])).toThrow(
+        'Secret path "/files/$/edit" goes on after its splat'
+      );
+    });
+
     it("reads the person and session from the SDK's cookie on a page load", () => {
       record();
 

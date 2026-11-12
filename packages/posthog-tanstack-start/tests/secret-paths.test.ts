@@ -60,6 +60,65 @@ describe(pathRedactor, () => {
     expect(dotted("/a.b/secret")).toBe("/a.b/$id");
     expect(dotted("/axb/secret")).toBe("/axb/secret");
   });
+
+  it.each([
+    // A splat: the rest of the path, slashes included.
+    ["/files/$", "/files/a/b/s3cr3t", "/files/$"],
+    [
+      "/files/$",
+      "https://app.example.com/files/a/s3cr3t?download=1#top",
+      "https://app.example.com/files/$?download=1#top",
+    ],
+    ["/files/{$}", "/files/a/s3cr3t", "/files/{$}"],
+    ["/files/v{$}.zip", "/files/va/s3cr3t.zip", "/files/v{$}.zip"],
+    ["/files/{$}/edit", "/files/a/s3cr3t/edit", "/files/{$}/edit"],
+    // One segment, with fixed text around the braces.
+    ["/t/{$token}", "/t/s3cr3t", "/t/{$token}"],
+    ["/t/{$token}.pdf", "/t/s3cr3t.pdf", "/t/{$token}.pdf"],
+    ["/t/prefix{$id}", "/t/prefixS3CR3T", "/t/prefix{$id}"],
+    ["/t/ticket-{$id}.pdf", "/T/TICKET-s3cr3t.PDF", "/t/ticket-{$id}.pdf"],
+    ["/t/{$token}/confirm", "/t/s3cr3t/confirm", "/t/{$token}/confirm"],
+    // An optional segment, when it is there.
+    ["/t/{-$token}", "/t/s3cr3t", "/t/{-$token}"],
+    ["/t/{-$token}/confirm", "/t/s3cr3t/confirm", "/t/{-$token}/confirm"],
+    ["/t/{-$a}/{-$b}", "/t/s3cr3t", "/t/{-$a}/{-$b}"],
+    // An index route's trailing slash.
+    ["/t/$token/", "/t/s3cr3t", "/t/$token/"],
+    ["/t/$token/", "/t/s3cr3t/", "/t/$token/"],
+  ])(
+    "reads %o as the router does, so %o leaves as %o",
+    (pattern, text, redacted) => {
+      expect(pathRedactor([pattern])(text)).toBe(redacted);
+    }
+  );
+
+  it.each([
+    ["/files/$", "/files"],
+    ["/files/$", "/filesystem/a"],
+    ["/t/{$token}.pdf", "/t/report.png"],
+    ["/t/prefix{$id}", "/t/other"],
+    ["/t/{-$token}", "/t"],
+    ["/t/{-$token}", "/tickets"],
+    ["/t/{-$token}/confirm", "/t/confirm"],
+  ])("with %o, leaves %o alone: it holds no secret", (pattern, text) => {
+    expect(pathRedactor([pattern])(text)).toBe(text);
+  });
+
+  it.each([
+    // The router reads these as fixed text, so they would never match the link.
+    "/t/prefix$id",
+    "/t/{token}",
+    "/t/{$token",
+    "/t/{$a}-{$b}",
+    "/t/{-$}",
+    // The router ignores what follows `$`, and reads what follows `{$}` as fixed text.
+    "/files/$/edit",
+    "/files/{$}/$id",
+  ])("throws for %o, which the router reads differently", (pattern) => {
+    expect(() => pathRedactor(["/q/$token", pattern])).toThrow(
+      `Secret path "${pattern}"`
+    );
+  });
 });
 
 describe(redactDeep, () => {
@@ -115,6 +174,12 @@ describe(redactSecretPaths, () => {
         $set: undefined,
         $set_once: { $initial_current_url: "https://app.example.com/t/$token" },
       })
+    );
+  });
+
+  it("throws at setup for a pattern the router reads differently", () => {
+    expect(() => redactSecretPaths(["/t/prefix$id"])).toThrow(
+      'Secret path "/t/prefix$id" has a part TanStack Router reads as fixed text: "prefix$id".'
     );
   });
 

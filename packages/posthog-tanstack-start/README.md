@@ -107,6 +107,18 @@ With [`@rivi-software/deploy-watch`](https://github.com/rivi-software/tools/tree
   - In the Worker's entry module, `setSecretPaths(patterns)` covers the exceptions' `$current_url` and `$pathname`.
   - In the posthog-js options, `before_send: redactSecretPaths(patterns)` covers every address an event or a person carries, an autocaptured link and the heatmap's keys included.
 
+  A pattern is read part by part, between slashes, as the router reads it, and matches in any case:
+
+  | Part | Matches |
+  | --- | --- |
+  | `t`, `files` | That text |
+  | `$token` | One segment |
+  | `{$token}`, with fixed text around it: `ticket-{$id}`, `{$token}.pdf` | One segment that starts and ends with that text |
+  | `{-$token}`, with or without text around it | One segment, or none |
+  | `$`, or `{$}` with fixed text around it | The rest of the path, slashes included |
+
+  A trailing slash (`/t/$token/`, an index route) is optional. `setSecretPaths` and `redactSecretPaths` throw for a pattern the router would read differently: a part it reads as fixed text, such as `prefix$id` (write `prefix{$id}`), `{token}` or two parameters in one part; anything after `$`; and anything but fixed text after `{$}`.
+
   Two things get past that:
   - Session replay's `$snapshot` is compressed and goes as it is. Keep replay off, or block those paths in the project settings.
   - posthog-js' flags request sends the person's first address past `before_send`. Set `advanced_disable_flags` when you use no feature flags.
