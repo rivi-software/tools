@@ -9,14 +9,44 @@ export interface PostHogBrowserConfig {
   host: string;
 }
 
-let ready: Promise<PostHog> | null = null;
+/** The SDK once it has loaded, or `null` when its chunk did not load. `null` while PostHog is off. */
+let ready: Promise<PostHog | null> | null = null;
+
+const startPostHog = async (
+  config: PostHogBrowserConfig,
+  options: Partial<PostHogConfig>
+) => {
+  let posthog: PostHog;
+
+  try {
+    ({ posthog } = await import("posthog-js"));
+  } catch (error) {
+    // A dropped connection, or a tab that outlived the deploy that removed the chunk.
+    console.warn(
+      "posthog-js did not load, so PostHog reports nothing until initPostHog runs again",
+      error
+    );
+    ready = null;
+
+    return null;
+  }
+
+  posthog.init(config.token, {
+    api_host: config.host,
+    defaults: "2026-05-30",
+    tracing_headers: [location.hostname],
+    ...options,
+  });
+
+  return posthog;
+};
 
 /**
  * Starts posthog-js with the app's own `options` (what it captures, its consent rules), over the SDK defaults of
  * 2026-05-30. The SDK is its own chunk (about 100 kB gzipped) loaded after hydration, so no page waits for it.
  * Same-origin requests (server functions, /api) carry the browser's distinct and session id, so an exception
  * `captureServerException` reports links to the person and the session replay. A cookieless visitor sends no
- * distinct id.
+ * distinct id. When the chunk does not load, it warns once and PostHog stays off until the next call.
  */
 export const initPostHog = (
   config: PostHogBrowserConfig | null,
@@ -30,21 +60,12 @@ export const initPostHog = (
     return;
   }
 
-  ready ??= import("posthog-js").then(({ posthog }) => {
-    posthog.init(config.token, {
-      api_host: config.host,
-      defaults: "2026-05-30",
-      tracing_headers: [location.hostname],
-      ...options,
-    });
-
-    return posthog;
-  });
+  ready ??= startPostHog(config, options);
 };
 
-/** Run once the SDK has loaded; a no-op when PostHog is not configured. */
+/** Run once the SDK has loaded; a no-op when PostHog is not configured or posthog-js did not load. */
 export const withPostHog = (fn: (posthog: PostHog) => void) => {
-  void ready?.then(fn);
+  void ready?.then((posthog) => posthog && fn(posthog));
 };
 
 /**

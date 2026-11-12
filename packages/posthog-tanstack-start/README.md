@@ -127,6 +127,8 @@ With [`@rivi-software/deploy-watch`](https://github.com/rivi-software/tools/tree
 - **The browser.** `initPostHog` loads posthog-js as its own chunk after hydration (about 100 kB gzipped), so no page waits for it. It applies the SDK defaults of 2026-05-30 and tracing headers to the page's own host, then the app's options over them.
 
   `withPostHog` runs a callback once the SDK has loaded (identify, reset, a custom event), and does nothing while PostHog is off. `captureClientException` reports what the router's error boundaries catch, which never reaches `window.onerror`.
+
+  When posthog-js does not load, such as on a dropped connection or in a tab that outlived the deploy that removed its chunk, `initPostHog` logs one warning and PostHog stays off: `withPostHog` and `captureClientException` do nothing, and no rejection reaches the app's `unhandledrejection` handlers. The next call to `initPostHog` imports posthog-js again.
 - **Source maps.** `posthogSourcemaps` uploads the browser's maps and the server environments' maps as release `releaseName` at `releaseVersion`. The version defaults to `GITHUB_SHA`, else `WORKERS_CI_COMMIT_SHA`. The browser's maps are deleted after the upload, so they are never served. The server's stay on disk for Wrangler's own upload (`upload_source_maps`). Without `POSTHOG_PERSONAL_API_KEY` it returns no plugins, so a local build uploads nothing and needs no PostHog credentials.
 
 ## In your app's tests
