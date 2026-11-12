@@ -24,6 +24,7 @@ export const USAGE = `Usage: semgrep-github-report --mode pr|summary [options]
   --findings <file>  the output of semgrep scan --json (default: semgrep-findings.json)
   --pr <number>      the pull request (default: the one in the pull_request event)
   --sha <commit>     the commit Semgrep scanned, which the links point at (default: GITHUB_SHA)
+  --author <login>   the account GITHUB_TOKEN comments as (default: github-actions[bot])
   -h, --help         show this help
 
 It reads GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_EVENT_PATH, GITHUB_STEP_SUMMARY, GITHUB_API_URL
@@ -34,6 +35,9 @@ and GITHUB_SERVER_URL as GitHub Actions sets them.`;
 const FORBIDDEN_HINT =
   "The token may not write comments here: the job needs `pull-requests: write`.";
 
+/** The account a job's GITHUB_TOKEN comments as. */
+const GITHUB_ACTIONS_LOGIN = "github-actions[bot]";
+
 type Env = Record<string, string | undefined>;
 
 interface Options {
@@ -41,12 +45,15 @@ interface Options {
   findings: string;
   pr?: string;
   sha?: string;
+  author: string;
 }
 
 interface IssueComment {
   id: number;
   body?: string;
   html_url?: string;
+  /** null for a deleted account. */
+  user?: { login?: string } | null;
 }
 
 interface GitHub {
@@ -71,6 +78,7 @@ const parseOptions = (argv: string[]): Options | undefined => {
         findings: { type: "string", default: "semgrep-findings.json" },
         pr: { type: "string" },
         sha: { type: "string" },
+        author: { type: "string", default: GITHUB_ACTIONS_LOGIN },
         help: { type: "boolean", short: "h", default: false },
       },
     }));
@@ -81,7 +89,7 @@ const parseOptions = (argv: string[]): Options | undefined => {
     });
   }
 
-  const { mode, findings, pr, sha, help } = values;
+  const { mode, findings, pr, sha, author, help } = values;
 
   if (help) {
     return undefined;
@@ -91,7 +99,13 @@ const parseOptions = (argv: string[]): Options | undefined => {
     throw new Error(`Invalid --mode ${mode ?? "(missing)"}\n\n${USAGE}`);
   }
 
-  return { mode, findings, pr, sha };
+  // A workflow that passes an unset variable would otherwise add a comment on every run. Only
+  // --mode pr reads it, so a summary step that shares the variable still runs.
+  if (mode === "pr" && !author) {
+    throw new Error(`Invalid --author: an empty login\n\n${USAGE}`);
+  }
+
+  return { mode, findings, pr, sha, author };
 };
 
 const requireEnv = (env: Env, name: string, option?: string): string => {
@@ -226,12 +240,19 @@ const githubJson = async <T>(
   return (await response.json()) as T;
 };
 
-/** The first comment on the pull request that carries the marker, looking 100 at a time. */
+/**
+ * The first comment on the pull request that `author` wrote and that opens with the marker,
+ * looking 100 at a time. A comment that quotes or pastes the report is someone else's, or holds
+ * the marker further in, and is left alone. GitHub matches logins in any case, so this does too.
+ */
 const findSemgrepPrComment = async (
   github: GitHub,
   repo: string,
-  prNumber: number
+  prNumber: number,
+  author: string
 ): Promise<IssueComment | undefined> => {
+  const login = author.toLowerCase();
+
   for (let page = 1; ; page += 1) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- each page is asked for only when the one before it was full
     const comments = await githubJson<IssueComment[]>(
@@ -240,12 +261,14 @@ const findSemgrepPrComment = async (
       `/repos/${repo}/issues/${prNumber}/comments?per_page=100&page=${page}`
     );
 
-    const marked = comments.find((comment) =>
-      comment.body?.includes(COMMENT_MARKER)
+    const ours = comments.find(
+      (comment) =>
+        comment.user?.login?.toLowerCase() === login &&
+        comment.body?.startsWith(COMMENT_MARKER)
     );
 
-    if (marked || comments.length < 100) {
-      return marked;
+    if (ours || comments.length < 100) {
+      return ours;
     }
   }
 };
@@ -304,8 +327,14 @@ export const main = async (argv: string[], env: Env): Promise<string> => {
   };
 
   const body = formatFindingsComment(findings, revision);
+
   // A pull request without findings gets no comment, but one it already has says they are gone.
-  const existing = await findSemgrepPrComment(github, repo, prNumber);
+  const existing = await findSemgrepPrComment(
+    github,
+    repo,
+    prNumber,
+    options.author
+  );
 
   if (existing) {
     const updated = await githubJson<IssueComment>(

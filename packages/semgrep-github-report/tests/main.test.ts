@@ -108,9 +108,15 @@ interface CommentResponse {
   id?: number;
   body?: string;
   html_url?: string;
+  user?: { login: string; type: string };
   message?: string;
   status?: string;
 }
+
+/** The account a job's GITHUB_TOKEN writes comments as. */
+const githubActions = { login: "github-actions[bot]", type: "Bot" };
+
+const person = { login: "octocat", type: "User" };
 
 const json = (
   body: CommentResponse | CommentResponse[],
@@ -139,6 +145,7 @@ describe(main, () => {
       const ours = {
         id: 4242,
         body: `${COMMENT_MARKER}\n## Semgrep findings\n\nOld list`,
+        user: githubActions,
       };
 
       const requests = stubGitHub(
@@ -231,6 +238,7 @@ describe(main, () => {
       const ours = {
         id: 9,
         body: `${COMMENT_MARKER}\n## Semgrep findings\n\nOld list`,
+        user: githubActions,
       };
 
       const requests = stubGitHub(
@@ -252,6 +260,122 @@ describe(main, () => {
       );
       expect(output).toBe(
         "Updated https://github.com/acme/app/pull/7#issuecomment-9 with 0 finding(s)."
+      );
+    });
+
+    it("updates its own comment, not a person's with the marker before it", async () => {
+      const pasted = {
+        id: 1,
+        body: `${COMMENT_MARKER}\n## Semgrep findings\n\nPasted from the run`,
+        user: person,
+      };
+
+      const ours = {
+        id: 2,
+        body: `${COMMENT_MARKER}\n## Semgrep findings\n\nOld list`,
+        user: githubActions,
+      };
+
+      const requests = stubGitHub(
+        json([pasted, ours]),
+        json({
+          id: 2,
+          html_url: "https://github.com/acme/app/pull/7#issuecomment-2",
+        })
+      );
+
+      const output = await main(
+        ["--mode", "pr", "--findings", findingsFile(finding("src/a.ts", 3))],
+        pullRequestEnv()
+      );
+
+      expect(
+        requests.map(({ method, url }) => `${method} ${url}`)
+      ).toStrictEqual([
+        `GET ${commentsUrl}?per_page=100&page=1`,
+        "PATCH https://api.github.com/repos/acme/app/issues/comments/2",
+      ]);
+      expect(output).toBe(
+        "Updated https://github.com/acme/app/pull/7#issuecomment-2 with 1 finding(s)."
+      );
+    });
+
+    it("comments anew when only a person's comment, or one that quotes the marker, carries it", async () => {
+      const pasted = {
+        id: 1,
+        body: `${COMMENT_MARKER}\n## Semgrep findings\n\nPasted from the run`,
+        user: person,
+      };
+
+      const quoted = {
+        id: 2,
+        body: `The report opens with \`${COMMENT_MARKER}\`.`,
+        user: githubActions,
+      };
+
+      const requests = stubGitHub(
+        json([pasted, quoted]),
+        json(
+          {
+            id: 3,
+            html_url: "https://github.com/acme/app/pull/7#issuecomment-3",
+          },
+          201
+        )
+      );
+
+      const output = await main(
+        ["--mode", "pr", "--findings", findingsFile(finding("src/a.ts", 3))],
+        pullRequestEnv()
+      );
+
+      expect(
+        requests.map(({ method, url }) => `${method} ${url}`)
+      ).toStrictEqual([
+        `GET ${commentsUrl}?per_page=100&page=1`,
+        `POST ${commentsUrl}`,
+      ]);
+      expect(output).toBe(
+        "Commented https://github.com/acme/app/pull/7#issuecomment-3 with 1 finding(s)."
+      );
+    });
+
+    it("updates the comment of the account --author names, in any case", async () => {
+      const fromActions = {
+        id: 1,
+        body: `${COMMENT_MARKER}\n## Semgrep findings\n\nFrom another workflow`,
+        user: githubActions,
+      };
+
+      const fromApp = {
+        id: 2,
+        body: `${COMMENT_MARKER}\n## Semgrep findings\n\nOld list`,
+        user: { login: "acme-scanner[bot]", type: "Bot" },
+      };
+
+      const requests = stubGitHub(
+        json([fromActions, fromApp]),
+        json({
+          id: 2,
+          html_url: "https://github.com/acme/app/pull/7#issuecomment-2",
+        })
+      );
+
+      await main(
+        [
+          "--mode",
+          "pr",
+          "--author",
+          "Acme-Scanner[bot]",
+          "--findings",
+          findingsFile(),
+        ],
+        pullRequestEnv()
+      );
+
+      expect(requests[1].method).toBe("PATCH");
+      expect(requests[1].url).toBe(
+        "https://api.github.com/repos/acme/app/issues/comments/2"
       );
     });
 
@@ -471,6 +595,27 @@ describe(main, () => {
       await expect(main(["--mode", "pr", "--findings"], env)).rejects.toThrow(
         "Option '--findings <value>' argument missing"
       );
+      await expect(main(["--mode", "pr", "--author", ""], env)).rejects.toThrow(
+        /^Invalid --author: an empty login\n\nUsage:/u
+      );
+    });
+
+    it("ignores an empty --author in --mode summary, which does not read it", async () => {
+      await expect(
+        main(
+          [
+            "--mode",
+            "summary",
+            "--author",
+            "",
+            "--sha",
+            "abc123",
+            "--findings",
+            findingsFile(),
+          ],
+          { GITHUB_REPOSITORY: "acme/app" }
+        )
+      ).resolves.toBe("## Semgrep findings on `abc123` (0)\n\nNo findings.\n");
     });
 
     it("prints its help", async () => {
