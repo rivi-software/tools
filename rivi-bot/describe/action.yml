@@ -8,7 +8,8 @@ branding:
 # Claude reads the pull request and answers in a fixed shape (--json-schema). It can read files and
 # nothing else: no commands, no edits, no GitHub tools. The steps after it decide what of that
 # answer reaches the pull request: the summary goes between its own markers in the description,
-# and only labels the repository already has are added. None is ever taken off.
+# and only labels the repository already has, and labels-deny does not hold back, are added. None
+# is ever taken off.
 
 inputs:
   anthropic-api-key:
@@ -34,6 +35,18 @@ inputs:
     description: "`true` adds the repository's labels that fit."
     required: false
     default: "true"
+  labels-deny:
+    description: The labels never added, however well they fit, one a line, with `*` for any run of characters and in any case. rivi-bot's own labels (`rivi-bot:*`) are never added either.
+    required: false
+    default: |
+      needs-*
+      ready-for-*
+      duplicate
+      wontfix
+      invalid
+      breaking-change
+      good first issue
+      help wanted
   instructions:
     description: What else the summary covers, or how.
     required: false
@@ -156,6 +169,7 @@ runs:
         RESULT: ${{ steps.claude.outputs.structured_output }}
         WRITE_SUMMARY: ${{ inputs.summary }}
         ADD_LABELS: ${{ inputs.labels }}
+        LABELS_DENY: ${{ inputs.labels-deny }}
       run: |
         set -euo pipefail
         if [ -z "$RESULT" ]; then
@@ -178,11 +192,18 @@ runs:
           echo "Wrote the summary into #$PR_NUMBER's description."
         fi
 
-        # Only labels the repository has, none of rivi-bot's own, and none already on.
+        # Only labels the repository has, none already on, and none labels-deny holds back
+        # (rivi-bot/labels.jq).
         if [ "$ADD_LABELS" = true ]; then
-          add=$(jq -c --slurpfile known "$DIR/labels.json" --slurpfile pr "$DIR/pull-request.json" '
-            ($known[0] | map(.name)) as $known | ($pr[0].labels | map(.name)) as $on
-            | [.labels | unique[] | select(IN($known[]) and (IN($on[]) | not) and (startswith("rivi-bot:") | not))]' <<< "$RESULT")
+          labels=$(jq -c -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
+            --slurpfile known "$DIR/labels.json" --slurpfile pr "$DIR/pull-request.json" '
+            include "labels";
+            .labels | labels_to_add($known[0] | map(.name); $pr[0].labels | map(.name); $deny | deny_patterns)' <<< "$RESULT")
+          add=$(jq -c .add <<< "$labels")
+          held=$(jq -r '.held | join(", ")' <<< "$labels")
+          if [ -n "$held" ]; then
+            echo "Left for a maintainer (labels-deny): $held."
+          fi
           if [ "$add" != "[]" ]; then
             jq -n --argjson labels "$add" '{labels: $labels}' |
               gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --input - --silent

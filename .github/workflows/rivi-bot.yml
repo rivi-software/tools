@@ -88,6 +88,8 @@ jobs:
       pull-requests: write # takes off a label that someone without write access added
     outputs:
       config: ${{ steps.config.outputs.config }}
+      # labels-deny, one pattern a line, as the actions take it.
+      labels-deny: ${{ steps.config.outputs.labels-deny }}
       review: ${{ steps.check.outputs.review }}
       approve: ${{ steps.check.outputs.approve }}
       describe: ${{ steps.check.outputs.describe }}
@@ -134,6 +136,8 @@ jobs:
           checked=$(jq -c --arg focus "$FOCUS" '
             {
               model: "claude-opus-5-5",
+              # The labels describe, triage and housekeeping never add (rivi-bot/labels.jq).
+              "labels-deny": ["needs-*", "ready-for-*", "duplicate", "wontfix", "invalid", "breaking-change", "good first issue", "help wanted"],
               review: {enabled: true, auto: "internal", approve: true, "follow-up": true, focus: $focus, model: ""},
               describe: {enabled: false, auto: "internal", summary: true, labels: true, instructions: "", model: ""},
               triage: {enabled: false, auto: "internal", labels: true, duplicates: true, questions: true, plan: true, prompt: true, instructions: "", model: ""},
@@ -146,7 +150,7 @@ jobs:
                 [$c | to_entries[] | .key as $k | .value as $v
                   | if ($d | has($k) | not) then "warning:\($p)\($k) is not a setting; it is ignored."
                     elif ($d[$k] | type) == "object" and ($v | type) == "object" then problems($d[$k]; $v; "\($p)\($k).")[]
-                    elif ($v | type) != ($d[$k] | type) then "error:\($p)\($k) should be a \(if ($d[$k] | type) == "object" then "mapping" else $d[$k] | type end)."
+                    elif ($v | type) != ($d[$k] | type) then "error:\($p)\($k) should be a \({object: "mapping", array: "list"}[$d[$k] | type] // ($d[$k] | type))."
                     else empty end];
             if type != "object" then {problems: ["error:the file should be a mapping of settings."]}
             else problems($defaults; .; "") as $problems
@@ -156,7 +160,9 @@ jobs:
                   ($c | to_entries[] | select(.value | type == "object" and has("auto"))
                     | select(.value.auto | IN("internal", "everyone", "off") | not)
                     | "error:\(.key).auto should be internal, everyone or off."),
-                  (if ($c.housekeeping["stale-days"] | . < 1 or . != floor) then "error:housekeeping.stale-days should be a whole number of days." else empty end)
+                  (if ($c.housekeeping["stale-days"] | . < 1 or . != floor) then "error:housekeeping.stale-days should be a whole number of days." else empty end),
+                  (if ($c["labels-deny"] | all(type == "string" and test("\\S") and (test("\n") | not))) then empty
+                   else "error:labels-deny should be a list of label names, each on one line." end)
                 ]),
                 # A feature without a model of its own runs on the top-level one.
                 config: ($c | with_entries(if (.value | type) == "object" and .value.model == "" then .value.model = $c.model else . end))}
@@ -167,6 +173,11 @@ jobs:
           config=$(jq -c .config <<< "$checked")
           jq -r '[to_entries[] | select(.value | type == "object") | "\(.key): \(if .value.enabled then "on" else "off" end)"] | join(", ")' <<< "$config"
           echo "config=$config" >> "$GITHUB_OUTPUT"
+          # The list, one pattern a line, for the actions' labels-deny input. rivi-bot:* is held
+          # back whatever the list says; naming it here also means an empty list is never an
+          # empty input, which could read as no input and bring back the action's default.
+          delimiter="EOF_$(openssl rand -hex 8)"
+          printf 'labels-deny<<%s\n%s\n%s\n' "$delimiter" "$(jq -r '[."labels-deny"[], "rivi-bot:*"] | join("\n")' <<< "$config")" "$delimiter" >> "$GITHUB_OUTPUT"
 
       - name: Check the event
         id: check
@@ -681,6 +692,7 @@ jobs:
           head-sha: ${{ needs.gate.outputs.head-sha }}
           summary: ${{ fromJSON(needs.gate.outputs.config).describe.summary }}
           labels: ${{ fromJSON(needs.gate.outputs.config).describe.labels }}
+          labels-deny: ${{ needs.gate.outputs.labels-deny }}
           instructions: ${{ format('{0}{1}{2}', fromJSON(needs.gate.outputs.config).describe.instructions, needs.gate.outputs.instructions && ' ' || '', needs.gate.outputs.instructions) }}
           model: ${{ fromJSON(needs.gate.outputs.config).describe.model }}
 
@@ -713,6 +725,7 @@ jobs:
           login: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
           issue: ${{ needs.gate.outputs.number }}
           labels: ${{ fromJSON(needs.gate.outputs.config).triage.labels }}
+          labels-deny: ${{ needs.gate.outputs.labels-deny }}
           duplicates: ${{ fromJSON(needs.gate.outputs.config).triage.duplicates }}
           questions: ${{ fromJSON(needs.gate.outputs.config).triage.questions }}
           plan: ${{ fromJSON(needs.gate.outputs.config).triage.plan }}
@@ -923,5 +936,6 @@ jobs:
           login: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
           stale-days: ${{ fromJSON(needs.gate.outputs.config).housekeeping['stale-days'] }}
           labels: ${{ fromJSON(needs.gate.outputs.config).housekeeping.labels }}
+          labels-deny: ${{ needs.gate.outputs.labels-deny }}
           instructions: ${{ fromJSON(needs.gate.outputs.config).housekeeping.instructions }}
           model: ${{ fromJSON(needs.gate.outputs.config).housekeeping.model }}

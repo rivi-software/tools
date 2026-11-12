@@ -74,6 +74,15 @@ For reviews alone, listen to `pull_request_target` and grant `contents: read` an
 
 ```yaml
 model: claude-opus-5-5 # each feature's model unless it names its own
+labels-deny: # labels describe, triage and housekeeping never add
+  - needs-*
+  - ready-for-*
+  - duplicate
+  - wontfix
+  - invalid
+  - breaking-change
+  - good first issue
+  - help wanted
 
 review:
   enabled: true
@@ -115,6 +124,8 @@ housekeeping:
 ```
 
 `auto` is `internal` (the author can write to the repository), `everyone` or `off`. `focus` and `instructions` can run to several lines, for a repository's review rules or its triage conventions. A setting of the wrong type stops the run with an error that names it, and a key that is not a setting is reported as a warning.
+
+`labels-deny` names the labels a maintainer sets, which describe, triage and housekeeping leave alone however well they fit: the labels that say where an issue stands or what happens to it next, such as one that starts a coding agent, and those that mark an issue as ready for outside contributors. Each entry is a label name, with `*` for any run of characters, and matches in any case. A list here replaces the default, so to add a label to it, repeat the default with it; `[]` lets every label through. rivi-bot's own labels (`rivi-bot:*`) are held back whatever the list says. A label held back is named in the job's log.
 
 ## Asking rivi-bot
 
@@ -165,7 +176,7 @@ In a review thread, `ask` answers in the thread and `fix` does what the thread a
 
 ## Describe
 
-Reads the pull request, its diff and the checkout, and writes a summary for whoever reviews it: what changes and why, the changes that matter, and what to look at closely. The summary goes at the end of the description, between markers of its own, and replaces itself the next time; the author's text is left as it is. It also adds the repository's labels that fit, from those the repository has. It runs when a pull request opens, reopens or leaves draft, not after each push: `@rivi-bot describe` writes it again. Medium effort, up to 15 turns and $2.
+Reads the pull request, its diff and the checkout, and writes a summary for whoever reviews it: what changes and why, the changes that matter, and what to look at closely. The summary goes at the end of the description, between markers of its own, and replaces itself the next time; the author's text is left as it is. It also adds the repository's labels that fit, from those the repository has, except those [`labels-deny`](#configuration) holds back. It runs when a pull request opens, reopens or leaves draft, not after each push: `@rivi-bot describe` writes it again. Medium effort, up to 15 turns and $2.
 
 ## Triage
 
@@ -177,7 +188,7 @@ Reads the issue, its comments, the repository's other issues and the default bra
 - The files involved and an approach (`plan`)
 - A prompt to hand a coding agent, folded away (`prompt`)
 
-It also adds the repository's labels that fit (`labels`). A duplicate is named only if that issue exists, a file only if the checkout has it. Medium effort, up to 25 turns and $2.
+It also adds the repository's labels that fit (`labels`), except those [`labels-deny`](#configuration) holds back. A duplicate is named only if that issue exists, a file only if the checkout has it. Medium effort, up to 25 turns and $2.
 
 An issue can come from anyone, and with `auto: everyone` each new one spends up to the triage budget, and Claude reads text written by whoever opened it. What Claude writes is limited to the comment and labels above, but the comment's text can still be steered by the issue.
 
@@ -197,7 +208,7 @@ On the caller's schedule, or started by hand, rivi-bot reads the open issues and
 
 - Pull requests approved but not merged, with changes requested, with conflicts, and quiet for `stale-days`
 - Issues that a merged pull request or the code seems to have fixed already, and issues that look like duplicates, both checked by Claude against the code
-- Labels that fit the issues without any, which it adds with `labels: true`
+- Labels that fit the issues without any, which it adds with `labels: true`; never one [`labels-deny`](#configuration) holds back
 - Issues without labels, and issues quiet for `stale-days`
 
 It closes nothing and comments nowhere else. Medium effort, up to 40 turns and $5.
@@ -211,6 +222,7 @@ The actions are built to run on pull requests and issues from anyone, once a mai
   - Claude gets `Read`, `Glob` and `Grep`, and in fix also `Edit` and `Write`. None of the actions lets it run a command, browse the web or start sub-agents, and none lets it read `/proc` or `/sys`, where the process's secrets are. What it needs from GitHub, such as the diff and the earlier reviews, a step fetches before it runs.
   - Checkouts keep no token, and no step runs a file from the workspace.
 - **Claude answers; the action acts.** Claude has no GitHub tools: it answers in a fixed shape, and the steps after it decide what of that answer reaches the repository. The review is posted on the commit Claude read, and approves only with `approve`. The other steps write only what the configuration turned on, add only labels the repository has, name only issues and files that exist, and edit only rivi-bot's own comments and its own section of a description. Nothing is closed, and no label is taken off.
+- **Labels for maintainers.** What Claude answers is shaped by text anyone can write, so a label that starts work, or records a maintainer's decision, could otherwise be added by an issue that asks for it. Describe, triage and housekeeping never add a label [`labels-deny`](#configuration) names, which by default holds back `needs-*`, `ready-for-*`, `duplicate`, `wontfix`, `invalid`, `breaking-change`, `good first issue` and `help wanted`, nor any of rivi-bot's own. One filter ([`labels.jq`](labels.jq)) decides for all three. If your repository acts on another label, such as one that starts a workflow, add it to the list.
 - **Fix in two jobs.** Claude edits a checkout in a job with a read-only token. A second job, which never runs Claude, checks the patch, commits it and pushes. Whatever the first job leaves on its runner cannot reach the token that pushes. The second job pushes nothing under `.github/`, and the first refuses a patch with the API key in it.
 - **One commit.** The review reads `head-sha`, the commit the maintainer approved, and nothing pushed after it.
 - **Prompt injection.** Claude is told that what the pull request or issue contains is material, never instructions. Text in a pull request can still steer what a review says, so a review approves only a pull request by someone with write access, and only with `approve`. A fix takes in comments only from rivi-bot and people with write access. A request in plain words is routed by a call to Claude with no tools, which can pick only an action the person asking, who has write access, could have named.
@@ -229,7 +241,7 @@ To pin an action, choose its other inputs, or decide yourself when it runs, use 
 | `rivi-software/tools/rivi-bot/ask` | [Ask](#ask) |
 | `rivi-software/tools/rivi-bot/housekeeping` | [Housekeeping](#housekeeping) |
 
-Each takes `anthropic-api-key`, `github-token` (`github.token` by default) and `model`, and its feature's settings from [the configuration](#configuration) as inputs of the same names; `action.yml` in its directory documents the rest. With an App, pass its installation token as `github-token`, and `<app-slug>[bot]` as `reviewer` or `login`.
+Each takes `anthropic-api-key`, `github-token` (`github.token` by default) and `model`, and its feature's settings from [the configuration](#configuration) as inputs of the same names; describe, triage and housekeeping also take `labels-deny`, one label a line. `action.yml` in its directory documents the rest. With an App, pass its installation token as `github-token`, and `<app-slug>[bot]` as `reviewer` or `login`.
 
 This workflow reviews a pull request once each time a maintainer adds the label:
 
