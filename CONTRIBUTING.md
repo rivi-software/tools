@@ -165,7 +165,7 @@ The other workflows run on GitHub Actions, from `.github/workflows/`, because De
 - [`review.yml`](.github/workflows/review.yml) (with [`rivi-bot.yml`](.github/workflows/rivi-bot.yml)) and [`pr-labels.yml`](.github/workflows/pr-labels.yml) run on pull requests from forks too, which Depot CI does not run yet.
 - [`changeset.yml`](.github/workflows/changeset.yml) runs [`scripts/check-changeset.ts`](scripts/check-changeset.ts) on every pull request, from forks too, and again when a label is added or removed, since `no-changeset` waives it. Its `Changeset` check is advisory: the ruleset requires only `CI / verify`, so a maintainer can push a missing changeset before merging.
 - [`issue-labels.yml`](.github/workflows/issue-labels.yml) and [`oss-project.yml`](.github/workflows/oss-project.yml) run when an issue opens, an event Depot CI does not take.
-- [`rivi-bot-bun.yml`](.github/workflows/rivi-bot-bun.yml) checks the Bun that rivi-bot's actions install on GitHub's runners, where those actions run in every repository that calls them. It runs only when a pull request or a push changes `rivi-bot/`.
+- [`rivi-bot-bun.yml`](.github/workflows/rivi-bot-bun.yml) checks the Bun that rivi-bot's actions install on GitHub's runners, where those actions run in every repository that calls them. It runs only when a pull request or a push changes `rivi-bot/`, so the ruleset does not require its checks: a required check that never runs would hold up every pull request that leaves `rivi-bot/` alone. The maintainer who merges a pull request that changes `rivi-bot/` waits for both `rivi-bot's Bun on <runner>` checks to pass instead. They fail on Dependabot's pull request that moves `claude-code-action` to a commit that pins another Bun: push the version and integrities that [`rivi-bot/install-bun.sh`](rivi-bot/install-bun.sh) asks for to Dependabot's branch, then merge.
 
 #### A pull request without CI checks
 
@@ -298,7 +298,7 @@ GitHub enforces the repository's rulesets; [`.github/rulesets/`](.github/ruleset
 
 - **`main.json`.** `main` changes only through pull requests, squashed, once the `CI / verify` check from the Depot Code Access app passes and the code owner approves. `CI / verify` is the job in [`.depot/workflows/ci.yml`](.depot/workflows/ci.yml) that passes when the checks and every Node version passed. Nobody pushes to `main` directly, force-pushes or deletes it.
   - [`.github/CODEOWNERS`](.github/CODEOWNERS) makes `rikvisser-dev` the owner of every file, so every pull request needs their approval. A review by anyone else, rivi-bot's included, is advice.
-  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `CI / verify` included, so wait for `CI / verify` first.
+  - `rikvisser-dev` can bypass the rules in a pull request only. GitHub does not let an author approve their own pull request, so they bypass the approval to merge their own. A bypass merges without waiting for any rule, `CI / verify` included, so wait for `CI / verify` first, and for rivi-bot's Bun checks on a pull request that changes `rivi-bot/` ([CI](#ci)).
   - A branch need not be up to date with `main` before it merges. Without a merge queue, that would rerun CI on every open pull request after each merge.
 - **`release-tags.json`.** A release tag (`@rivi-software/<name>@<version>`, `rivi-bot-v*`) is created once and is never moved or deleted, because users pin to it.
 

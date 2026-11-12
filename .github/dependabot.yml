@@ -1,10 +1,20 @@
 version: 2
 updates:
-  # The workflows on GitHub Actions, and CI's on Depot CI. One group bumps an action in both.
+  # The workflows on GitHub Actions, CI's on Depot CI, and each of rivi-bot's composite actions. A
+  # directory listed here does not cover the ones below it, so a new action's directory goes here
+  # too. One group bumps an action in all of them: every rivi-bot action moves to a new
+  # claude-code-action in one pull request, where rivi-bot-bun.yml checks the Bun it pins.
   - package-ecosystem: github-actions
     directories:
       - /
       - /.depot/workflows
+      - /rivi-bot
+      - /rivi-bot/ask
+      - /rivi-bot/describe
+      - /rivi-bot/fix
+      - /rivi-bot/fix/push
+      - /rivi-bot/housekeeping
+      - /rivi-bot/triage
     schedule:
       interval: weekly
     cooldown:
