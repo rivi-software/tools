@@ -183,7 +183,7 @@ It is at most 21 characters, all of them lowercase letters, digits and hyphens, 
 
 ### What the sweep deletes
 
-The sweep reads the Worker's Previews from Cloudflare and the repository's branches and pull requests from GitHub, both in full, before it deletes anything. It takes each Preview's branch from its name:
+The sweep reads the Worker's Previews from Cloudflare, then the repository's branches and pull requests from GitHub, both in full, before it deletes anything. A Preview deployed while the sweep runs is either missing from its list or has its branch in the repository's: the sweep never takes it for a deleted branch's. It takes each Preview's branch from its name:
 
 | Name | Branch | Stale when |
 | --- | --- | --- |

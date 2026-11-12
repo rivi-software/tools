@@ -144,10 +144,13 @@ const inventory = async (
     keep?: readonly string[];
   }
 ) => {
-  const [previews, repository] = await Promise.all([
-    listPreviews(target.api, target.worker),
-    target.repository(),
-  ]);
+  // The Previews first, then the repository, never both at once. A Preview is deployed after its
+  // branch is pushed or its pull request opened, so the branch or pull request of each listed
+  // Preview existed before the repository read starts, and is in it unless it is really gone. In
+  // parallel, a Preview deployed while the repository is read can miss its branch, and the sweep
+  // deletes it.
+  const previews = await listPreviews(target.api, target.worker);
+  const repository = await target.repository();
 
   const deployed = new Map(
     previews.map((preview) => [preview.name, preview.deployed_on])
@@ -211,8 +214,8 @@ export interface SweepResult {
 
 /**
  * Compares every Preview of the Worker with the repository's branches and pull requests, and with
- * `apply` deletes the stale ones (`planSweep`). Reads both lists before it deletes anything, and
- * throws when either may be incomplete. One target's failed delete, such as a branch whose build is
+ * `apply` deletes the stale ones (`planSweep`). Reads the Previews, then the repository, both before
+ * it deletes anything, and throws when either may be incomplete. One target's failed delete, such as a branch whose build is
  * running, does not stop the rest: the result lists it under `failed`.
  */
 export const sweepPreviews = async (
