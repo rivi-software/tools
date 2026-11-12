@@ -1,3 +1,4 @@
+import { statSync, symlinkSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -109,6 +110,69 @@ describe("which assets .assetsignore leaves out", () => {
         "a/_headers",
       ].filter(ignores)
     ).toStrictEqual(["_headers", "_redirects", ".assetsignore"]);
+  });
+});
+
+describe("links in the assets directory", () => {
+  it("serve what wrangler deploy serves", { timeout: 30_000 }, async () => {
+    const dir = temporaryDirectory();
+    const assets = path.join(dir, "public");
+
+    write(dir, {
+      "index.js": "export default { fetch: () => new Response() };",
+      "wrangler.json": JSON.stringify({
+        name: "assets-links-test",
+        main: "index.js",
+        compatibility_date: "2026-11-01",
+        assets: { directory: "public" },
+      }),
+      "shared/app.js.map": "{}",
+      "shared/fonts/a.woff2": "a",
+      "shared/fonts/nested/b.css.map": "{}",
+      "public/index.html": "index",
+      "public/.assetsignore": "private*\n",
+    });
+    symlinkSync("../shared/app.js.map", path.join(assets, "app.js.map"));
+    symlinkSync("../shared/fonts", path.join(assets, "fonts"), "dir");
+    symlinkSync("../shared/fonts", path.join(assets, "private"), "dir");
+    // Wrangler fails on a link to nothing it would serve, and passes over one it leaves out.
+    symlinkSync("../nowhere", path.join(assets, "private-dangling"));
+
+    // At debug level, a dry run logs each path it reads from the directory, and each it leaves out.
+    const output = await wrangler(
+      dir,
+      ["deploy", "--dry-run", "--outdir", "out"],
+      { WRANGLER_LOG: "debug" }
+    );
+
+    const logged = (pattern: RegExp) =>
+      [...output.matchAll(pattern)].map((match) =>
+        (match.groups?.asset ?? "").trim().split(path.sep).join("/")
+      );
+
+    const leftOut = new Set(logged(/^Ignoring asset: (?<asset>.+)$/gmu));
+
+    // Wrangler uploads each path it read and did not leave out that `stat` finds to be a file.
+    const byWrangler = logged(/^\/(?<asset>[^/].*)$/gmu)
+      .filter(
+        (asset) =>
+          !leftOut.has(asset) &&
+          statSync(path.join(assets, asset), {
+            throwIfNoEntry: false,
+          })?.isFile()
+      )
+      .toSorted();
+
+    const { served } = await readAssets(assets);
+    const paths = served.map(({ asset }) => asset);
+
+    expect(paths).toStrictEqual(byWrangler);
+    expect(paths).toStrictEqual([
+      "app.js.map",
+      "fonts/a.woff2",
+      "fonts/nested/b.css.map",
+      "index.html",
+    ]);
   });
 });
 

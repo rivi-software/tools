@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { rmSync, symlinkSync } from "node:fs";
 import path from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -437,6 +437,81 @@ describe(checkWorkerBundle, () => {
       expect(found.map(({ message }) => message)).toStrictEqual([
         `dist/client/assets/app.js:1 holds a value shaped like a Stripe secret key, from src/config.ts (fingerprint ${STRIPE.fingerprint}).`,
       ]);
+    });
+  });
+
+  describe("links", () => {
+    it("serves a link to a file as that file, and names it by its path in the assets", async () => {
+      const options = assetsProject({
+        ".env": `STRIPE_KEY=${STRIPE.secret}\n`,
+        "build/maps/app.js.map": "{}",
+        "dist/client/assets/app.js": "app()",
+      });
+
+      const client = path.join(options.cwd, "dist/client");
+      symlinkSync(
+        "../../../build/maps/app.js.map",
+        path.join(client, "assets/app.js.map")
+      );
+      symlinkSync("../../.env", path.join(client, ".env"));
+      // A link to nothing serves nothing: Wrangler fails the deploy on it itself.
+      symlinkSync("missing.txt", path.join(client, "dangling.txt"));
+
+      const found = await problems(options);
+
+      expect(found.map(({ message }) => message)).toStrictEqual([
+        "dist/client/assets/app.js.map is a source map Wrangler would serve: leave it out with dist/client/.assetsignore, or delete it before the deploy.",
+        `dist/client/.env:1 holds a value shaped like a Stripe secret key (fingerprint ${STRIPE.fingerprint}).`,
+      ]);
+    });
+
+    it("follows a link to a directory in the assets, as Wrangler does", async () => {
+      const options = assetsProject({
+        "shared/fonts/font.css.map": "{}",
+        "shared/fonts/notes.txt": STRIPE.secret,
+        "dist/client/index.html": "<!doctype html>",
+      });
+
+      const client = path.join(options.cwd, "dist/client");
+      symlinkSync("../../shared/fonts", path.join(client, "fonts"), "dir");
+
+      const found = await problems(options);
+
+      expect(found.map(({ message }) => message)).toStrictEqual([
+        "dist/client/fonts/font.css.map is a source map Wrangler would serve: leave it out with dist/client/.assetsignore, or delete it before the deploy.",
+        `dist/client/fonts/notes.txt:1 holds a value shaped like a Stripe secret key (fingerprint ${STRIPE.fingerprint}).`,
+      ]);
+
+      write(options.cwd, { "dist/client/.assetsignore": "fonts/\n" });
+
+      await expect(checkWorkerBundle(options)).resolves.toMatchObject({
+        servedAssets: 1,
+        ignoredAssets: 3,
+        problems: [],
+      });
+    });
+
+    it("reads a link to a file in the Worker's build, and does not follow a link to a directory there", async () => {
+      const options = assetsProject({
+        "vendor/extra.js": `export const key = "${STRIPE.secret}";`,
+        "vendor/lib/inner.js": `export const key = "${STRIPE.secret}";`,
+      });
+
+      const server = path.join(options.cwd, "dist/server");
+      symlinkSync("../../vendor/extra.js", path.join(server, "extra.js"));
+      symlinkSync("../../vendor/lib", path.join(server, "lib"), "dir");
+
+      // Wrangler's walk for a Worker's modules takes the first link and not the second.
+      await expect(
+        checkWorkerBundle({
+          cwd: options.cwd,
+          serverDir: options.serverDir,
+          allowedSecrets: ALLOW_MOCK_KEY,
+        })
+      ).resolves.toMatchObject({
+        workerFiles: ["dist/server/extra.js", "dist/server/index.js"],
+        allowedSecrets: 1,
+      });
     });
   });
 
