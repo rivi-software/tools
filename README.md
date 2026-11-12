@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rivi-software/tools/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/rivi-software/tools/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="https://github.com/rivi-software/tools/commits/main"><img src="https://img.shields.io/github/check-runs/rivi-software/tools/main?nameFilter=CI%20%2F%20verify&label=CI" alt="CI status"></a>
   <a href="https://www.npmjs.com/org/rivi-software"><img src="https://img.shields.io/badge/npm-%40rivi--software-0b6b3a" alt="npm: @rivi-software"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0b6b3a" alt="MIT License"></a>
 </p>

@@ -1,0 +1,116 @@
+name: CI
+
+# Runs on Depot CI, which reports each job to GitHub as a check from the Depot Code Access app,
+# named `CI / <job>`: the main ruleset requires `CI / verify` from that app
+# (.github/rulesets/main.json). Depot CI does not run pull requests from forks yet, so a maintainer
+# copies one to a branch here, where this runs on it (CONTRIBUTING.md#pull-requests-from-forks).
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# A push to a pull request cancels its run that is still going. Each commit on main has a group of
+# its own, so no run on main waits for or cancels another, and every commit there gets a verify
+# check: a rivi-bot release waits for one on the commit it tags.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # What does not change with the Node version runs once: the manifests, the format, the lint and
+  # the types (@types/node follows the oldest Node supported).
+  checks:
+    name: Checks
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      # No pnpm store cache: the install takes a few seconds from the registry, and Depot Cache,
+      # which would hold it, is shared by every branch's runs.
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check publishable manifests
+        run: pnpm run check:manifests
+
+      - name: Format
+        run: pnpm run format:check
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run check
+
+  # The tests, and the packed packages as plain Node imports them, on each Node version.
+  test:
+    name: Test on Node ${{ matrix.node }}
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The packages support Node 22 and later, until 22's end of life on 2027-04-30; then the
+        # floor moves to 24 (here, in `engines` and in @types/node). .node-version is the one
+        # we develop on.
+        node: ["22", "24", "26"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      # No pnpm store cache, as in Checks.
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm run test
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Check packed packages
+        run: pnpm run check:packages
+
+  # The check the main ruleset requires (.github/rulesets/main.json). It passes only when Checks
+  # and every Node version passed, so the jobs above can change without changing the ruleset. It
+  # runs even when one of them failed: a skipped check would count as passing.
+  verify:
+    name: verify
+    if: always()
+    needs: [checks, test]
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        env:
+          CHECKS: ${{ needs.checks.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          echo "Checks: $CHECKS. The Node versions together: $TEST."
+          test "$CHECKS" = success && test "$TEST" = success
