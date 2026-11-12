@@ -326,5 +326,24 @@ describe("the Worker's PostHog client", () => {
         ],
       });
     });
+
+    it("sends an event whose property holds itself with the secret paths as their pattern", async () => {
+      const { server, bodies } = await realClient();
+      server.setSecretPaths(["/t/$token"]);
+      const loop: Loop = { page: "/t/k3y0f4t1ck3t" };
+      loop.self = loop;
+      server.captureServerEvent("ticket_viewed", "usr_1", { loop });
+
+      await vi.waitFor(() => expect(bodies).toHaveLength(1));
+      expect(JSON.parse(bodies[0] ?? "")).toMatchObject({
+        batch: [
+          {
+            event: "ticket_viewed",
+            properties: { loop: { page: "/t/$token", self: "[Circular]" } },
+          },
+        ],
+      });
+      expect(bodies[0]).not.toMatch(/k3y/u);
+    });
   });
 });
