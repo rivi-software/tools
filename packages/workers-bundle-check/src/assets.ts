@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import ignore from "ignore";
@@ -49,9 +49,37 @@ const byAsset = (a: AssetFile, b: AssetFile): number => {
   return a.asset > b.asset ? 1 : 0;
 };
 
-/** The files of the assets directory, as Wrangler's upload sees them. */
+/**
+ * The codes `stat` fails with for a link that points to nothing: its target is missing
+ * (`ENOENT`), goes through a file (`ENOTDIR`), or is a loop of links (`ELOOP`).
+ */
+const NO_TARGET = new Set(["ENOENT", "ENOTDIR", "ELOOP"]);
+
+/**
+ * Whether `file` is a file, or a link to one: `stat` follows links. A link that points to
+ * nothing is not a file.
+ */
+export const isFile = async (file: string): Promise<boolean> => {
+  const stats = await stat(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== undefined && NO_TARGET.has(error.code)) {
+      return;
+    }
+
+    throw error;
+  });
+
+  return stats?.isFile() ?? false;
+};
+
+/**
+ * The files of the assets directory, as Wrangler's upload sees them. Wrangler's
+ * `buildAssetManifest` lists the directory with `readdir`, which follows a link to a directory,
+ * and uploads each path that `stat` finds to be a file, so a link to a file is served as that file.
+ */
 export const readAssets = async (dir: string): Promise<Assets> => {
-  const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+  // Without `withFileTypes`, `readdir` follows links to directories on every Node version, as
+  // Wrangler's call does; with it, Node 26 follows them and Node 22 and 24 do not.
+  const entries = await readdir(dir, { recursive: true });
 
   const assetsIgnore = await readFile(
     path.join(dir, ".assetsignore"),
@@ -67,12 +95,14 @@ export const readAssets = async (dir: string): Promise<Assets> => {
   const ignored = assetsIgnoreMatcher(assetsIgnore);
   const assets: Assets = { served: [], ignored: [] };
 
-  for (const entry of entries) {
-    if (!entry.isFile()) {
+  const files = entries.map((entry) => path.join(dir, entry));
+  const areFiles = await Promise.all(files.map(isFile));
+
+  for (const [index, file] of files.entries()) {
+    if (!areFiles[index]) {
       continue;
     }
 
-    const file = path.join(entry.parentPath, entry.name);
     const asset: AssetFile = { asset: posixRelative(dir, file), file };
     (ignored(asset.asset) ? assets.ignored : assets.served).push(asset);
   }

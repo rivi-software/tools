@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { findServedSourceMaps, readAssets } from "./assets.js";
+import { findServedSourceMaps, isFile, readAssets } from "./assets.js";
 import type { AssetFile, Assets } from "./assets.js";
 import {
   describeRule,
@@ -23,6 +23,7 @@ import type { AllowedSecret, SecretPattern } from "./secrets.js";
 import {
   decodeMappings,
   display,
+  posixRelative,
   readSourceMap,
   realPath,
   renderedSources,
@@ -380,32 +381,62 @@ const scanSecrets = async (
   return { problems, allowedCount, used };
 };
 
+/** Whether `file` is `dir` or lies under it. */
+const isWithin = (dir: string, file: string): boolean => {
+  const relative = path.relative(dir, file);
+
+  return (
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+};
+
+/**
+ * The files under `dir`, as Wrangler's walk for a Worker's modules (`getFiles`) finds them: a
+ * link to a file counts as that file, and a link to a directory is not followed.
+ */
+const filesUnder = async (dir: string): Promise<string[]> => {
+  const entries = await readdir(dir, { withFileTypes: true });
+
+  const found = await Promise.all(
+    entries.map(async (entry) => {
+      const file = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        return filesUnder(file);
+      }
+
+      const counts =
+        entry.isFile() || (entry.isSymbolicLink() && (await isFile(file)));
+
+      return counts ? [file] : [];
+    })
+  );
+
+  return found.flat();
+};
+
 /** Every file of the Worker's build output, but the assets when they live inside it. */
 const serverBuildFiles = async (
   serverDir: string,
   assetsDir: string | undefined,
   show: (file: string) => string
 ): Promise<string[]> => {
-  const entries = await readdir(serverDir, {
-    recursive: true,
-    withFileTypes: true,
-  }).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === "ENOENT") {
-      throw new Error(
-        `There is no Worker build at ${show(serverDir)}: run the build first.`
-      );
+  const files = await filesUnder(serverDir).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        throw new Error(
+          `There is no Worker build at ${show(serverDir)}: run the build first.`
+        );
+      }
+
+      throw error;
     }
+  );
 
-    throw error;
-  });
-
-  const inAssets = (file: string) =>
-    assetsDir !== undefined && !path.relative(assetsDir, file).startsWith("..");
-
-  return entries
-    .filter((entry) => entry.isFile())
-    .map((entry) => path.join(entry.parentPath, entry.name))
-    .filter((file) => !inAssets(file))
+  return files
+    .filter((file) => assetsDir === undefined || !isWithin(assetsDir, file))
     .toSorted();
 };
 
@@ -448,7 +479,20 @@ const inspect = async (
   validateRules(rules);
   validateAllowedSecrets(allowed);
   validateSecretPatterns(extra);
-  const show = (file: string) => display(file, cwd);
+
+  /**
+   * A path as reports show it. A file in the assets or the Worker's build is named by its path
+   * there, the one Wrangler uploads it by, also when it is a link or sits in a linked directory.
+   */
+  const show = (file: string): string => {
+    const dir = [assetsDir, serverDir].find(
+      (candidate) => candidate !== undefined && isWithin(candidate, file)
+    );
+
+    return dir === undefined
+      ? display(file, cwd)
+      : path.posix.join(display(dir, cwd), posixRelative(dir, file));
+  };
 
   const texts = new Map<string, Promise<string>>();
 
