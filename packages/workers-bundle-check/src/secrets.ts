@@ -59,6 +59,16 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   },
   { name: "Linear API key", pattern: /\blin_api_[A-Za-z0-9]{40}\b/u },
   { name: "Hugging Face token", pattern: /\bhf_[A-Za-z0-9]{34,}\b/u },
+  // Cloudflare's prefixed formats: 40 alphanumeric characters, then a checksum of 8 hex digits.
+  // A Global API key is cfk_, a user API token cfut_ and an account API token cfat_.
+  {
+    name: "Cloudflare API credential",
+    pattern: /\bcf(?:k|ut|at)_[A-Za-z0-9]{40}[a-f0-9]{8}\b/u,
+  },
+  {
+    name: "Cloudflare Access service token secret",
+    pattern: /\bcfast_[A-Za-z0-9]{40}[a-f0-9]{8}\b/u,
+  },
 ];
 
 /**
