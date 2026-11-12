@@ -62,5 +62,6 @@ scope:repo:
           - .gitignore
           - .node-version
           - .claude/**
+          - .depot/**
           - oxfmt.config.ts
           - oxlint.config.ts
