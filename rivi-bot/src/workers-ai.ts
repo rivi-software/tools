@@ -221,7 +221,10 @@ const readAnswer = (
   return readStreamedAnswer(response.body, heard);
 };
 
-/** The model's message (text or tool calls) from Workers AI's Chat Completions endpoint. */
+/**
+ * The model's message (text or tool calls) from Workers AI's Chat Completions endpoint. An answer
+ * that max_tokens cut off is an error, never a message.
+ */
 export const workersAiMessage = async (
   env: Env,
   fetchImpl: Fetch,
@@ -283,13 +286,19 @@ export const workersAiMessage = async (
     }
 
     const { message, finish } = await readAnswer(response, heard);
+    const answered = Boolean(message.content || message.tool_calls?.length);
 
-    if (!message.content && !message.tool_calls?.length) {
+    // An answer max_tokens cut off may end in half a tool call, whose arguments read as none.
+    if (finish === "length") {
       throw new Error(
-        finish === "length"
-          ? "used up max_tokens before it answered (finish_reason length)"
-          : `returned no text (finish_reason ${finish ?? "none"})`
+        answered
+          ? "used up max_tokens partway through its answer (finish_reason length)"
+          : "used up max_tokens before it answered (finish_reason length)"
       );
+    }
+
+    if (!answered) {
+      throw new Error(`returned no text (finish_reason ${finish ?? "none"})`);
     }
 
     return message;

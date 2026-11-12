@@ -194,6 +194,10 @@ interface ScriptedCall {
 interface ScriptedMessage {
   content?: string;
   tool_calls?: ScriptedCall[];
+  /** The tokens the model reasons for before it answers, which count toward max_tokens. */
+  reasoning?: number;
+  /** Why the answer stopped, when it is not the usual reason, such as `length` for one cut off. */
+  finish?: string;
 }
 
 /** What the review sends: a review to GitHub, or a Chat Completions request to Workers AI. */
@@ -202,6 +206,7 @@ interface SentBody {
   comments?: { body: string; line: number; path: string; side: string }[];
   commit_id?: string;
   event?: string;
+  max_tokens?: number;
   model?: string;
   stream?: boolean;
   messages?: { role: string; content: string; tool_call_id?: string }[];
@@ -329,9 +334,13 @@ const fakes = ({
   const respond = (url: string, init: RequestInit = {}): Response => {
     const method = init.method ?? "GET";
 
+    // SAFETY: the review sends every body as JSON, either a review or a Chat Completions request.
+    const body = init.body
+      ? (JSON.parse(String(init.body)) as SentBody)
+      : undefined;
+
     calls.push({
-      // SAFETY: the review sends every body as JSON, either a review or a Chat Completions request.
-      body: init.body ? (JSON.parse(String(init.body)) as SentBody) : undefined,
+      body,
       // SAFETY: the review sends its headers as a plain object of strings.
       headers: (init.headers ?? {}) as Record<string, string>,
       method,
@@ -341,16 +350,28 @@ const fakes = ({
     if (url.includes("/ai/v1/chat/completions")) {
       const next = answers.shift();
 
-      return next
-        ? reply({
-            choices: [
-              {
-                finish_reason: next.tool_calls ? "tool_calls" : "stop",
-                message: next,
-              },
-            ],
-          })
-        : reply({ errors: ["bad request"] }, 400);
+      if (!next) {
+        return reply({ errors: ["bad request"] }, 400);
+      }
+
+      const { reasoning = 0, finish, ...message } = next;
+
+      // As the real model does, a model whose reasoning fills max_tokens stops with no answer.
+      if (reasoning >= (body?.max_tokens ?? Number.POSITIVE_INFINITY)) {
+        return reply({
+          choices: [{ finish_reason: "length", message: { content: "" } }],
+        });
+      }
+
+      return reply({
+        choices: [
+          {
+            finish_reason:
+              finish ?? (message.tool_calls ? "tool_calls" : "stop"),
+            message,
+          },
+        ],
+      });
     }
 
     const endpoint = url.replace("https://api.github.com/repos/o/r", "");
@@ -547,6 +568,26 @@ describe("a whole review", () => {
 });
 
 describe("Workers AI", () => {
+  it("leaves the model room to reason at length and still answer", async () => {
+    // The failed reviews on #143 reasoned past 12,000 tokens in one round.
+    const { calls, fetchImpl } = fakes({
+      answers: [
+        {
+          ...submit({
+            comments: [],
+            summary: "Nothing to change.",
+            verdict: "approve",
+          }),
+          reasoning: 40_000,
+        },
+      ],
+    });
+
+    await run(env(), { fetchImpl, log: quiet });
+
+    expect(reviewsPosted(calls)).toHaveLength(1);
+  });
+
   it("is called directly without an AI Gateway", async () => {
     const { calls, fetchImpl } = fakes();
     await run(env(), { fetchImpl, log: quiet });
@@ -797,6 +838,31 @@ describe("a review that goes wrong", () => {
     expect(messagesOf(aiCalls(calls)[1]).at(-1)?.content).toMatch(
       /^Submit your review with submit_review\./u
     );
+  });
+
+  it("posts nothing and fails when max_tokens cuts submit_review short", async () => {
+    const { calls, fetchImpl } = fakes({
+      answers: [
+        {
+          finish: "length",
+          tool_calls: [
+            {
+              function: {
+                arguments: '{"verdict":"comment","summary":"- `b / 0` thr',
+                name: "submit_review",
+              },
+              id: "s1",
+              type: "function",
+            },
+          ],
+        },
+      ],
+    });
+
+    await expect(run(env(), { fetchImpl, log: quiet })).rejects.toThrow(
+      /used up max_tokens partway through its answer/u
+    );
+    expect(reviewsPosted(calls)).toStrictEqual([]);
   });
 
   it("posts again with every finding in the body when GitHub refuses an inline comment", async () => {
