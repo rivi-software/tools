@@ -1,5 +1,15 @@
 # @rivi-software/workers-bundle-check
 
+## 0.2.0
+
+### Minor Changes
+
+- a48e2de: The secret check finds Cloudflare's own credentials in their prefixed formats: a Global API key (`cfk_`), a user or account API token (`cfut_`, `cfat_`) and an Access service token secret (`cfast_`). A `CLOUDFLARE_API_TOKEN` that a `define` or an `import.meta.env` read inlines into the build now fails the check. Credentials in the older format, without a prefix, still have no shape to find.
+
+### Patch Changes
+
+- 12d6145: The check now follows symbolic links as Wrangler does. Before, it passed over every link in the assets directory, though Wrangler serves a link to a file as that file, so a linked `.map` file or `.env` was served unreported. A link to a file in the assets now counts as the file, a link to a directory serves the files in it, and a report names each by its path in the assets directory. In `serverDir`, a link to a file is read too, and a link to a directory is not followed, on every Node version.
+
 ## 0.1.3
 
 ### Patch Changes

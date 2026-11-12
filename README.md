@@ -69,7 +69,7 @@ Then set `GITHUB_TOKEN` to a classic personal access token with `read:packages` 
 
 ## rivi-bot
 
-[`rivi-bot`](rivi-bot#readme) is a set of GitHub Actions and a reusable workflow rather than a package: Claude on a repository's pull requests and issues. It reviews pull requests, and, where a repository turns them on, describes them, triages issues, fixes review findings, answers questions and reports on the backlog. RIVI Software runs it as RIVI Bot on its own repositories, this one included.
+[`rivi-bot`](rivi-bot#readme) is a set of GitHub Actions and a reusable workflow rather than a package: AI on a repository's pull requests and issues. It reviews pull requests on Workers AI, and, where a repository turns them on, describes them, triages issues, fixes review findings, answers questions and reports on the backlog on Claude. RIVI Software runs it as RIVI Bot on its own repositories, this one included.
 
 ## Contributing
 

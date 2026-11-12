@@ -18,6 +18,12 @@ jobs:
       pull-requests: write
     with:
       app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }}
+      # The review runs on Workers AI through the authenticated AI Gateway github-rivi-tools, as
+      # Clef's issue labels do (issue-labels.yml).
+      cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      ai-gateway: github-rivi-tools
     secrets:
+      cloudflare-ai-api-token: ${{ secrets.CLOUDFLARE_AI_API_TOKEN }}
+      cloudflare-ai-gateway-token: ${{ secrets.CLOUDFLARE_AI_GATEWAY_TOKEN }}
       anthropic-api-key: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
       app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }}

@@ -1,9 +1,10 @@
 name: rivi-bot
 
-# rivi-bot runs Claude on a repository's pull requests and issues, through the rivi-bot actions
-# (rivi-bot/). This is a reusable workflow: a repository calls it from a workflow of its own
-# (rivi-bot/README.md#setup), as this one does from review.yml. The event, github.token and the
-# repository are the caller's.
+# rivi-bot runs AI on a repository's pull requests and issues, through the rivi-bot actions
+# (rivi-bot/): the review on Workers AI, with the caller's Cloudflare account, and everything else
+# on Claude, with the caller's Anthropic key. This is a reusable workflow: a repository calls it
+# from a workflow of its own (rivi-bot/README.md#setup), as this one does from review.yml. The
+# event, github.token and the repository are the caller's.
 #
 # What runs is the caller's to choose, in .github/rivi-bot.yml on its default branch
 # (rivi-bot/README.md#configuration): never the pull request's copy, which anyone could edit.
@@ -27,7 +28,8 @@ name: rivi-bot
 # request or in a review thread. A command right after the mention, with its slash or alone, is
 # that command: `@rivi-bot /fix the null check`, `@rivi-bot review`. Any other request goes to
 # Claude, which picks the one of review, describe, fix, triage and ask that does what it asks, or
-# none. `/rivi-bot <command>` at the start of a comment still works. The comment gets eyes while
+# none; without the Anthropic key, only a command the comment opens with counts. `/rivi-bot
+# <command>` at the start of a comment still works. The comment gets eyes while
 # the job runs, then a rocket; or a confused face and a reply when rivi-bot can't do what it asks,
 # or the job fails.
 #
@@ -43,7 +45,17 @@ on:
         required: false
         default: ""
       focus:
-        description: What else this repository's reviews look for, added to the list Claude checks. `review.focus` in the configuration file takes its place.
+        description: What else this repository's reviews look for, added to the list the model checks. `review.focus` in the configuration file takes its place.
+        type: string
+        required: false
+        default: ""
+      cloudflare-account-id:
+        description: The Cloudflare account whose Workers AI the review runs on.
+        type: string
+        required: false
+        default: ""
+      ai-gateway:
+        description: An AI Gateway of that account to send the review's calls through; without one, they go to Workers AI directly.
         type: string
         required: false
         default: ""
@@ -53,9 +65,15 @@ on:
         required: false
         default: .github/rivi-bot.yml
     secrets:
+      cloudflare-ai-api-token:
+        description: A Cloudflare API token with Workers AI Read (and AI Gateway Run, for an authenticated `ai-gateway`), which the review runs on.
+        required: false
+      cloudflare-ai-gateway-token:
+        description: The AI Gateway's own token, when it is authenticated and the API token cannot run it.
+        required: false
       anthropic-api-key:
-        description: The Anthropic API key Claude runs on, from a workspace with a spend limit.
-        required: true
+        description: The Anthropic API key Claude runs on, from a workspace with a spend limit, for describe, triage, fix, ask, housekeeping and reading requests in plain words.
+        required: false
       app-private-key:
         description: The private key of the App named by app-client-id.
         required: false
@@ -89,6 +107,8 @@ jobs:
       pull-requests: write # takes off a label that someone without write access added
     outputs:
       config: ${{ steps.config.outputs.config }}
+      # labels-deny, one pattern a line, as the actions take it.
+      labels-deny: ${{ steps.config.outputs.labels-deny }}
       review: ${{ steps.check.outputs.review }}
       approve: ${{ steps.check.outputs.approve }}
       describe: ${{ steps.check.outputs.describe }}
@@ -135,6 +155,8 @@ jobs:
           checked=$(jq -c --arg focus "$FOCUS" '
             {
               model: "claude-opus-5-5",
+              # The labels describe, triage and housekeeping never add (rivi-bot/labels.jq).
+              "labels-deny": ["needs-*", "ready-for-*", "duplicate", "wontfix", "invalid", "breaking-change", "good first issue", "help wanted"],
               review: {enabled: true, auto: "internal", approve: true, "follow-up": true, focus: $focus, model: ""},
               describe: {enabled: false, auto: "internal", summary: true, labels: true, instructions: "", model: ""},
               triage: {enabled: false, auto: "internal", labels: true, duplicates: true, questions: true, plan: true, prompt: true, instructions: "", model: ""},
@@ -147,7 +169,7 @@ jobs:
                 [$c | to_entries[] | .key as $k | .value as $v
                   | if ($d | has($k) | not) then "warning:\($p)\($k) is not a setting; it is ignored."
                     elif ($d[$k] | type) == "object" and ($v | type) == "object" then problems($d[$k]; $v; "\($p)\($k).")[]
-                    elif ($v | type) != ($d[$k] | type) then "error:\($p)\($k) should be a \(if ($d[$k] | type) == "object" then "mapping" else $d[$k] | type end)."
+                    elif ($v | type) != ($d[$k] | type) then "error:\($p)\($k) should be a \({object: "mapping", array: "list"}[$d[$k] | type] // ($d[$k] | type))."
                     else empty end];
             if type != "object" then {problems: ["error:the file should be a mapping of settings."]}
             else problems($defaults; .; "") as $problems
@@ -157,10 +179,16 @@ jobs:
                   ($c | to_entries[] | select(.value | type == "object" and has("auto"))
                     | select(.value.auto | IN("internal", "everyone", "off") | not)
                     | "error:\(.key).auto should be internal, everyone or off."),
-                  (if ($c.housekeeping["stale-days"] | . < 1 or . != floor) then "error:housekeeping.stale-days should be a whole number of days." else empty end)
+                  (if ($c.housekeeping["stale-days"] | . < 1 or . != floor) then "error:housekeeping.stale-days should be a whole number of days." else empty end),
+                  (if ($c["labels-deny"] | all(type == "string" and test("\\S") and (test("\n") | not))) then empty
+                   else "error:labels-deny should be a list of label names, each on one line." end),
+                  (if $c.review.model != "" and ($c.review.model | test("^(@cf/|[a-z0-9-]+/)") | not) then "error:review.model runs on Workers AI: name a Workers AI model, such as @cf/deepseek-ai/deepseek-v4.1-flash-1017." else empty end)
                 ]),
-                # A feature without a model of its own runs on the top-level one.
-                config: ($c | with_entries(if (.value | type) == "object" and .value.model == "" then .value.model = $c.model else . end))}
+                # The review runs on Workers AI: without a model of its own, on DeepSeek V4.1 Flash. A
+                # feature on Claude without one runs on the top-level model.
+                config: ($c
+                  | .review.model |= (if . == "" then "@cf/deepseek-ai/deepseek-v4.1-flash-1017" else . end)
+                  | with_entries(if (.value | type) == "object" and .value.model == "" then .value.model = $c.model else . end))}
               end
             end' <<< "$file")
           jq -r --arg path "$CONFIG_PATH" '.problems[] | sub("^error:"; "::error::\($path): ") | sub("^warning:"; "::warning::\($path): ")' <<< "$checked"
@@ -168,6 +196,11 @@ jobs:
           config=$(jq -c .config <<< "$checked")
           jq -r '[to_entries[] | select(.value | type == "object") | "\(.key): \(if .value.enabled then "on" else "off" end)"] | join(", ")' <<< "$config"
           echo "config=$config" >> "$GITHUB_OUTPUT"
+          # The list, one pattern a line, for the actions' labels-deny input. rivi-bot:* is held
+          # back whatever the list says; naming it here also means an empty list is never an
+          # empty input, which could read as no input and bring back the action's default.
+          delimiter="EOF_$(openssl rand -hex 8)"
+          printf 'labels-deny<<%s\n%s\n%s\n' "$delimiter" "$(jq -r '[."labels-deny"[], "rivi-bot:*"] | join("\n")' <<< "$config")" "$delimiter" >> "$GITHUB_OUTPUT"
 
       - name: Check the event
         id: check
@@ -465,9 +498,14 @@ jobs:
                 exit 0
               }
 
-              # Claude's pick of the actions here, tried three times: {action, reason}.
+              # Claude's pick of the actions here, tried three times: {action, reason}. Without the
+              # Anthropic key there is no pick.
               pick() {
                 local body response try said thread_json=null
+                if [ -z "$ANTHROPIC_API_KEY" ]; then
+                  echo "::notice::Without the anthropic-api-key secret, rivi-bot reads only a command the comment opens with." >&2
+                  return 1
+                fi
                 said=$(gh api "repos/$GITHUB_REPOSITORY/issues/$number/comments" --paginate 2> /dev/null |
                   jq -sc --argjson id "$COMMENT_ID" '[.[][] | select(.id != $id)
                     | {login: .user.login, body: (.body // "" | gsub("<!--[\\s\\S]*?-->"; "") | sub("\\A\\s+"; "") | sub("\\s+\\z"; ""))}] | .[-6:]') ||
@@ -587,8 +625,9 @@ jobs:
     needs: gate
     if: needs.gate.outputs.review == 'true'
     runs-on: ubuntu-24.04
-    # Room for a whole pull request's 120 turns, so its budget stops it before the clock does.
-    timeout-minutes: 60
+    # A whole review's calls to Workers AI have 20 minutes together (BUDGETS in
+    # rivi-bot/src/review.ts), so its budget stops it before the clock does.
+    timeout-minutes: 30
     # One review of a pull request at a time; none that started is cancelled, since a
     # half-posted review helps nobody. Of the pushes that wait, only the latest is reviewed.
     concurrency:
@@ -600,10 +639,11 @@ jobs:
     steps:
       - name: Check the credentials
         env:
-          KEY_SET: ${{ secrets.anthropic-api-key != '' }}
+          ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}
+          TOKEN_SET: ${{ secrets.cloudflare-ai-api-token != '' }}
         run: |
-          if [ "$KEY_SET" != "true" ]; then
-            echo "::error::The anthropic-api-key secret is empty; set the Actions secret the caller passes (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
+          if [ -z "$ACCOUNT_ID" ] || [ "$TOKEN_SET" != "true" ]; then
+            echo "::error::The review runs on Workers AI: pass the cloudflare-account-id input and the cloudflare-ai-api-token secret (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
             exit 1
           fi
 
@@ -624,7 +664,10 @@ jobs:
         id: review
         uses: rivi-software/tools/rivi-bot@main
         with:
-          anthropic-api-key: ${{ secrets.anthropic-api-key }}
+          cloudflare-account-id: ${{ inputs.cloudflare-account-id }}
+          cloudflare-ai-api-token: ${{ secrets.cloudflare-ai-api-token }}
+          cloudflare-ai-gateway-token: ${{ secrets.cloudflare-ai-gateway-token }}
+          ai-gateway: ${{ inputs.ai-gateway }}
           github-token: ${{ steps.app.outputs.token || github.token }}
           reviewer: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
           pull-request: ${{ needs.gate.outputs.number }}
@@ -677,6 +720,15 @@ jobs:
       contents: read
       pull-requests: write
     steps:
+      - name: Check the credentials
+        env:
+          KEY_SET: ${{ secrets.anthropic-api-key != '' }}
+        run: |
+          if [ "$KEY_SET" != "true" ]; then
+            echo "::error::describe runs on Claude: pass the anthropic-api-key secret (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
+            exit 1
+          fi
+
       - name: Get the App's token
         id: app
         if: inputs.app-client-id != ''
@@ -696,6 +748,7 @@ jobs:
           head-sha: ${{ needs.gate.outputs.head-sha }}
           summary: ${{ fromJSON(needs.gate.outputs.config).describe.summary }}
           labels: ${{ fromJSON(needs.gate.outputs.config).describe.labels }}
+          labels-deny: ${{ needs.gate.outputs.labels-deny }}
           instructions: ${{ format('{0}{1}{2}', fromJSON(needs.gate.outputs.config).describe.instructions, needs.gate.outputs.instructions && ' ' || '', needs.gate.outputs.instructions) }}
           model: ${{ fromJSON(needs.gate.outputs.config).describe.model }}
 
@@ -710,6 +763,15 @@ jobs:
       group: rivi-bot-triage-${{ needs.gate.outputs.number }}
       cancel-in-progress: true
     steps:
+      - name: Check the credentials
+        env:
+          KEY_SET: ${{ secrets.anthropic-api-key != '' }}
+        run: |
+          if [ "$KEY_SET" != "true" ]; then
+            echo "::error::triage runs on Claude: pass the anthropic-api-key secret (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
+            exit 1
+          fi
+
       - name: Get the App's token
         id: app
         if: inputs.app-client-id != ''
@@ -728,6 +790,7 @@ jobs:
           login: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
           issue: ${{ needs.gate.outputs.number }}
           labels: ${{ fromJSON(needs.gate.outputs.config).triage.labels }}
+          labels-deny: ${{ needs.gate.outputs.labels-deny }}
           duplicates: ${{ fromJSON(needs.gate.outputs.config).triage.duplicates }}
           questions: ${{ fromJSON(needs.gate.outputs.config).triage.questions }}
           plan: ${{ fromJSON(needs.gate.outputs.config).triage.plan }}
@@ -757,6 +820,15 @@ jobs:
       title: ${{ steps.fix.outputs.title }}
       summary: ${{ steps.fix.outputs.summary }}
     steps:
+      - name: Check the credentials
+        env:
+          KEY_SET: ${{ secrets.anthropic-api-key != '' }}
+        run: |
+          if [ "$KEY_SET" != "true" ]; then
+            echo "::error::fix runs on Claude: pass the anthropic-api-key secret (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
+            exit 1
+          fi
+
       - name: Get the App's token
         id: app
         if: inputs.app-client-id != ''
@@ -822,6 +894,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Check the credentials
+        env:
+          KEY_SET: ${{ secrets.anthropic-api-key != '' }}
+        run: |
+          if [ "$KEY_SET" != "true" ]; then
+            echo "::error::ask runs on Claude: pass the anthropic-api-key secret (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
+            exit 1
+          fi
+
       - name: Get the App's token
         id: app
         if: inputs.app-client-id != ''
@@ -919,6 +1000,15 @@ jobs:
       group: rivi-bot-housekeeping
       cancel-in-progress: false
     steps:
+      - name: Check the credentials
+        env:
+          KEY_SET: ${{ secrets.anthropic-api-key != '' }}
+        run: |
+          if [ "$KEY_SET" != "true" ]; then
+            echo "::error::housekeeping runs on Claude: pass the anthropic-api-key secret (https://github.com/rivi-software/tools/blob/main/rivi-bot/README.md#setup)."
+            exit 1
+          fi
+
       - name: Get the App's token
         id: app
         if: inputs.app-client-id != ''
@@ -938,5 +1028,6 @@ jobs:
           login: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
           stale-days: ${{ fromJSON(needs.gate.outputs.config).housekeeping['stale-days'] }}
           labels: ${{ fromJSON(needs.gate.outputs.config).housekeeping.labels }}
+          labels-deny: ${{ needs.gate.outputs.labels-deny }}
           instructions: ${{ fromJSON(needs.gate.outputs.config).housekeeping.instructions }}
           model: ${{ fromJSON(needs.gate.outputs.config).housekeeping.model }}

@@ -12,7 +12,7 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "fix": "ultracite fix -A unicorn/catch-error-name -A typescript/consistent-type-definitions -A unicorn/prefer-dom-node-append -A unicorn/prefer-dom-node-dataset -A unicorn/prefer-query-selector -A unicorn/prefer-at -A unicorn/prefer-set-has -A unicorn/prefer-spread -A unicorn/prefer-bigint-literals -A unicorn/prefer-import-meta-properties -A unicorn/prefer-number-coercion -A unicorn/prefer-type-error -A unicorn/prefer-regexp-test -A unicorn/text-encoding-identifier-case -A unicorn/no-useless-undefined -A vitest/prefer-describe-function-title",
-    "test": "pnpm -r run test && vitest run --dir scripts",
+    "test": "pnpm -r run test && vitest run --dir scripts && vitest run --dir rivi-bot",
     "check:manifests": "node scripts/check-publish-manifests.ts",
     "check:packages": "node scripts/check-packed-imports.ts",
     "verify": "pnpm run check:manifests && pnpm run format:check && pnpm run lint && pnpm run check && pnpm run test && pnpm run build && pnpm run check:packages",

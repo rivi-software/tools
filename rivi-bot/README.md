@@ -1,6 +1,6 @@
 # rivi-bot
 
-Claude on a repository's pull requests and issues, as GitHub Actions. It reviews pull requests: Claude reads the pull request at one commit, with read-only tools, and the action posts what it finds as one review with an inline comment for each finding, pinned to that commit. A repository can also have it describe pull requests, triage issues, fix review findings, answer questions and report on the backlog, each turned on and shaped in [one configuration file](#configuration).
+AI on a repository's pull requests and issues, as GitHub Actions. It reviews pull requests on [Workers AI](https://developers.cloudflare.com/workers-ai/): a model reads the pull request at one commit, with read-only tools, and the action posts what it finds as one review with an inline comment for each finding, pinned to that commit. A repository can also have it describe pull requests, triage issues, fix review findings, answer questions and report on the backlog, on Claude, each turned on and shaped in [one configuration file](#configuration).
 
 RIVI Software runs it as RIVI Bot on its own repositories, through [a reusable workflow](../.github/workflows/rivi-bot.yml) that any repository can call. Without a configuration file, it only reviews: a pull request by someone with write access when it opens and after every push, and any other pull request once a maintainer adds the `rivi-bot:review` label.
 
@@ -19,10 +19,11 @@ What runs on its own, without being asked, follows each feature's `auto` setting
 
 ## Setup
 
-1. Add an Anthropic API key as an Actions secret, such as `ANTHROPIC_REVIEW_API_KEY`. Use a key from a workspace with a spend limit.
-2. Create the `rivi-bot:review` label, which approves the reviews of a pull request. Adding a label needs triage access; the workflow also checks for write access.
-3. Optionally, use a GitHub App installed on the repository, so that rivi-bot posts as the App instead of `github-actions`, and so that CI runs on the commits [fix](#fix) pushes. Keep its client ID in an Actions variable and its private key in a secret. It needs **Contents: read** and **Pull requests: write**, and also **Issues: write** for triage, ask and housekeeping, and **Contents: write** for fix.
-4. Add a workflow that calls the reusable workflow. The events it listens to and the permissions it grants are the most rivi-bot can do; [the configuration](#configuration) chooses what it does:
+1. For reviews, keep a Cloudflare account ID in an Actions variable, such as `CLOUDFLARE_ACCOUNT_ID`, and an API token of that account with **Workers AI Read** in a secret, such as `CLOUDFLARE_AI_API_TOKEN`. Optionally, send the calls through an [AI Gateway](https://developers.cloudflare.com/ai-gateway/), for its logs and rate limits: the token then also needs **AI Gateway Run**, or the gateway's own token goes in a secret of its own.
+2. For anything else (describe, triage, fix, ask, housekeeping, and requests to rivi-bot in plain words), add an Anthropic API key as an Actions secret, such as `ANTHROPIC_REVIEW_API_KEY`. Use a key from a workspace with a spend limit.
+3. Create the `rivi-bot:review` label, which approves the reviews of a pull request. Adding a label needs triage access; the workflow also checks for write access.
+4. Optionally, use a GitHub App installed on the repository, so that rivi-bot posts as the App instead of `github-actions`, and so that CI runs on the commits [fix](#fix) pushes. Keep its client ID in an Actions variable and its private key in a secret. It needs **Contents: read** and **Pull requests: write**, and also **Issues: write** for triage, ask and housekeeping, and **Contents: write** for fix.
+5. Add a workflow that calls the reusable workflow. The events it listens to and the permissions it grants are the most rivi-bot can do; [the configuration](#configuration) chooses what it does:
 
 ```yaml
 name: rivi-bot
@@ -47,25 +48,33 @@ jobs:
       issues: write # triage, ask and housekeeping
       pull-requests: write
     with:
+      cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      ai-gateway: my-gateway # optional
       app-client-id: ${{ vars.AUTOMATION_APP_CLIENT_ID }} # optional
     secrets:
-      anthropic-api-key: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
+      cloudflare-ai-api-token: ${{ secrets.CLOUDFLARE_AI_API_TOKEN }}
+      cloudflare-ai-gateway-token: ${{ secrets.CLOUDFLARE_AI_GATEWAY_TOKEN }} # optional
+      anthropic-api-key: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }} # all but the review
       app-private-key: ${{ secrets.AUTOMATION_APP_PRIVATE_KEY }} # optional
 ```
 
-For reviews alone, listen to `pull_request_target` and grant `contents: read` and `pull-requests: write`, as [this repository's workflow](../.github/workflows/review.yml) does. A job that needs a permission the caller did not grant fails when it runs, and says which.
+For reviews alone, listen to `pull_request_target`, grant `contents: read` and `pull-requests: write`, and pass only the Cloudflare credentials. A job that needs a permission or a credential the caller did not grant fails when it runs, and says which.
 
-5. Optionally, add `.github/rivi-bot.yml` to turn features on.
+6. Optionally, add `.github/rivi-bot.yml` to turn features on.
 
 | Workflow input | What |
 | --- | --- |
+| `cloudflare-account-id` | The Cloudflare account whose Workers AI the review runs on; the review needs it |
+| `ai-gateway` | An AI Gateway of that account to send the review's calls through; without one, they go to Workers AI directly |
 | `app-client-id` | The client ID of the App rivi-bot posts as; without it, it posts as `github-actions` |
 | `config-path` | The configuration file, `.github/rivi-bot.yml` by default |
 | `focus` | What else reviews look for; `review.focus` in the configuration takes its place |
 
 | Workflow secret | What |
 | --- | --- |
-| `anthropic-api-key` | (required) The key Claude runs on |
+| `cloudflare-ai-api-token` | The token the review runs on: **Workers AI Read**, and **AI Gateway Run** for an authenticated `ai-gateway`; the review needs it |
+| `cloudflare-ai-gateway-token` | The gateway's own token, when the API token cannot run it |
+| `anthropic-api-key` | The key Claude runs on, for every feature but the review, and for requests in plain words |
 | `app-private-key` | The private key of the App named by `app-client-id` |
 
 ## Configuration
@@ -73,7 +82,16 @@ For reviews alone, listen to `pull_request_target` and grant `contents: read` an
 `.github/rivi-bot.yml`, read from the default branch: a pull request that edits it changes nothing until it merges. Every key is optional; these are the defaults:
 
 ```yaml
-model: claude-opus-5-5 # each feature's model unless it names its own
+model: claude-opus-5-5 # the Claude model of each feature but the review, unless it names its own
+labels-deny: # labels describe, triage and housekeeping never add
+  - needs-*
+  - ready-for-*
+  - duplicate
+  - wontfix
+  - invalid
+  - breaking-change
+  - good first issue
+  - help wanted
 
 review:
   enabled: true
@@ -81,7 +99,7 @@ review:
   approve: true # a review of an internal pull request approves when nothing has to change
   follow-up: true # after a first review, review only what changed since
   focus: "" # what else to look for
-  model: "" # the top-level model
+  model: "" # a Workers AI model; @cf/deepseek-ai/deepseek-v4.1-flash-1017
 
 describe:
   enabled: false
@@ -114,14 +132,16 @@ housekeeping:
   instructions: ""
 ```
 
-`auto` is `internal` (the author can write to the repository), `everyone` or `off`. `focus` and `instructions` can run to several lines, for a repository's review rules or its triage conventions. A setting of the wrong type stops the run with an error that names it, and a key that is not a setting is reported as a warning.
+`auto` is `internal` (the author can write to the repository), `everyone` or `off`. `review.model` is a Workers AI model that takes tools through Chat Completions, such as `@cf/openai/gpt-oss-120b`; a Claude model name there stops the run. `focus` and `instructions` can run to several lines, for a repository's review rules or its triage conventions. A setting of the wrong type stops the run with an error that names it, and a key that is not a setting is reported as a warning.
+
+`labels-deny` names the labels a maintainer sets, which describe, triage and housekeeping leave alone however well they fit: the labels that say where an issue stands or what happens to it next, such as one that starts a coding agent, and those that mark an issue as ready for outside contributors. Each entry is a label name, with `*` for any run of characters, and matches in any case. A list here replaces the default, so to add a label to it, repeat the default with it; `[]` lets every label through. rivi-bot's own labels (`rivi-bot:*`) are held back whatever the list says. A label held back is named in the job's log.
 
 ## Asking rivi-bot
 
 Someone with write access asks rivi-bot in a comment that speaks to `@rivi-bot`: on a pull request, on an issue, or in a review thread on a pull request's lines.
 
 - **A command.** A command right after the mention, with its slash or alone, runs as it is: `@rivi-bot /fix only the null check`, `@rivi-bot review`. What follows the command, to the end of the comment, is passed along, code and quoted lines included.
-- **Plain words.** Any other request goes to Claude, which reads it with the issue or pull request, the review thread and the latest comments, and picks the one action that does what it asks, or none: `@rivi-bot rename this to fetchAll` is a fix, `@rivi-bot why does this retry?` is a question, and a thank-you is nothing. A question about a change is answered rather than made. Routing is one call to the top-level `model` at low effort, with no tools. Should it fail, a command the comment opens with is taken.
+- **Plain words.** Any other request goes to Claude, which reads it with the issue or pull request, the review thread and the latest comments, and picks the one action that does what it asks, or none: `@rivi-bot rename this to fetchAll` is a fix, `@rivi-bot why does this retry?` is a question, and a thank-you is nothing. A question about a change is answered rather than made. Routing is one call to the top-level `model` at low effort, with no tools. Should it fail, or without `anthropic-api-key`, a command the comment opens with is taken.
 - **Reactions.** The comment gets eyes (👀) while the job runs, then a rocket (🚀). When rivi-bot can't do what it asks (the feature is off, the action does not work there, the pull request is closed or comes from a fork), or a job it ran fails, the comment gets a confused face (😕) and a reply that says why.
 
 | Command | On | Does |
@@ -142,8 +162,8 @@ In a review thread, `ask` answers in the thread and `fix` does what the thread a
   - The diff from the base to the commit under review
   - The pull request's title, description, commits and conversation
   - Earlier reviews and review threads, so it does not repeat a finding that was answered or fixed
-  - Any file in a checkout of that commit
-  - The repository's own guides (AGENTS.md, CONTRIBUTING.md, the READMEs), for the conventions it holds a change to
+  - Any file in a checkout of that commit, through read-only tools: search, read and list the files, and search and read the repository's issues
+  - The repository's AGENTS.md files, for the conventions it holds a change to: the root's (or its CLAUDE.md), and each one in a directory above a changed file, up to eight; CONTRIBUTING.md and the READMEs when it reads them
 - **What it looks for.**
   - Bugs and unhandled cases
   - Security holes
@@ -154,19 +174,20 @@ In a review thread, `ask` answers in the thread and `fix` does what the thread a
   - `focus`, for what your repository adds to that list
 
   Style and lint are left to CI.
-- **What it writes.** Exactly one review on the commit it read: an inline comment per finding, with a suggestion block when the fix is a few lines it is sure of, and a short body with the findings that need a change, one line each. If GitHub refuses a comment's line, the review carries every comment in its body instead. The review comments; it approves only with `approve`, which the reusable workflow passes only for a pull request by someone with write access. It never requests changes and never posts a plain comment.
+- **What it writes.** Exactly one review on the commit it read: an inline comment per finding on a line of the head that the diff shows, with a suggestion block when the fix replaces that one line and it is sure of it, and a short body with the findings that need a change, one line each, then any finding on another line. If GitHub refuses a comment's line all the same, the review carries every comment in its body instead. The review comments; it approves only with `approve`, which the reusable workflow passes only for a pull request by someone with write access. It never requests changes and never posts a plain comment.
 - **The check.** The review job's check on the pull request fails when the review found something that has to change before the pull request merges, and passes when nothing has to; optional suggestions do not fail it. This holds whether or not the review may approve. With nothing new to review, such as a re-run on the same commit or a push that only rebases, the last review's verdict stands, so neither turns the check green. A review asked for in a comment runs on the default branch, whose latest commit gets its check, so that check passes whatever the review found. On an outside pull request, text in the pull request can steer the verdict as it can the review: a passing check there is not an approval.
 - **When.** A pull request by someone with write access when it opens or leaves draft, and after every push (`auto: internal`). Any other pull request once a maintainer adds the `rivi-bot:review` label, and after every push while the label stays on, until a maintainer takes it off; or once, when a maintainer asks for a review. A push to a draft is not reviewed, but the label still asks for a review of a draft.
 - **Approvals.** An approval stands for the commit it read. Before a review of a later commit, the reviewer's earlier approvals on the pull request are dismissed, and the new review approves again if nothing has to change.
 - **Follow-up reviews.** After an earlier review by the same login, it reads only what changed since the commit that review read. It replays that commit's changes onto the pull request's current fork point (`git merge-tree`), so a rebase onto the base, or a merge of it, is not reviewed again. If nothing changed but the base, there is no review.
 - **Budget.**
-  - A whole pull request runs at high effort, with up to 120 turns and $10: the turns let it read a large pull request, and the budget is what stops it. The reusable workflow gives the job 60 minutes for that; a review that runs out of time says so on the pull request.
-  - A follow-up runs at medium effort, with up to 20 turns and $3.
-  - The API key's workspace spend limit is the hard cap.
+  - A whole pull request has up to 16 rounds of tool calls and 20 minutes for its calls to Workers AI, and sees the first 120,000 characters of the diff; `read_diff` reads one file's part whole. The reusable workflow gives the job 30 minutes; a review that fails says so on the pull request.
+  - A follow-up has up to 8 rounds, 10 minutes and 60,000 characters.
+  - A review that runs out of rounds submits what it found, and says what it could not check; one that never submits posts nothing and fails.
+  - Workers AI bills the account by the token; an AI Gateway's rate limits cap how often it runs.
 
 ## Describe
 
-Reads the pull request, its diff and the checkout, and writes a summary for whoever reviews it: what changes and why, the changes that matter, and what to look at closely. The summary goes at the end of the description, between markers of its own, and replaces itself the next time; the author's text is left as it is. It also adds the repository's labels that fit, from those the repository has. It runs when a pull request opens, reopens or leaves draft, not after each push: `@rivi-bot describe` writes it again. Medium effort, up to 15 turns and $2.
+Reads the pull request, its diff and the checkout, and writes a summary for whoever reviews it: what changes and why, the changes that matter, and what to look at closely. The summary goes at the end of the description, between markers of its own, and replaces itself the next time; the author's text is left as it is. It also adds the repository's labels that fit, from those the repository has, except those [`labels-deny`](#configuration) holds back. It runs when a pull request opens, reopens or leaves draft, not after each push: `@rivi-bot describe` writes it again. Medium effort, up to 15 turns and $2.
 
 ## Triage
 
@@ -178,7 +199,7 @@ Reads the issue, its comments, the repository's other issues and the default bra
 - The files involved and an approach (`plan`)
 - A prompt to hand a coding agent, folded away (`prompt`)
 
-It also adds the repository's labels that fit (`labels`). A duplicate is named only if that issue exists, a file only if the checkout has it. Medium effort, up to 25 turns and $2.
+It also adds the repository's labels that fit (`labels`), except those [`labels-deny`](#configuration) holds back. A duplicate is named only if that issue exists, a file only if the checkout has it. Medium effort, up to 25 turns and $2.
 
 An issue can come from anyone, and with `auto: everyone` each new one spends up to the triage budget, and Claude reads text written by whoever opened it. What Claude writes is limited to the comment and labels above, but the comment's text can still be steered by the issue.
 
@@ -198,7 +219,7 @@ On the caller's schedule, or started by hand, rivi-bot reads the open issues and
 
 - Pull requests approved but not merged, with changes requested, with conflicts, and quiet for `stale-days`
 - Issues that a merged pull request or the code seems to have fixed already, and issues that look like duplicates, both checked by Claude against the code
-- Labels that fit the issues without any, which it adds with `labels: true`
+- Labels that fit the issues without any, which it adds with `labels: true`; never one [`labels-deny`](#configuration) holds back
 - Issues without labels, and issues quiet for `stale-days`
 
 It closes nothing and comments nowhere else. Medium effort, up to 40 turns and $5.
@@ -208,13 +229,14 @@ It closes nothing and comments nowhere else. Medium effort, up to 40 turns and $
 The actions are built to run on pull requests and issues from anyone, once a maintainer allows it.
 
 - **Nothing from the repository runs.**
-  - Claude Code loads no settings, hooks or MCP servers from the checkout (`--setting-sources user`, `--strict-mcp-config`, hooks off).
-  - Claude gets `Read`, `Glob` and `Grep`, and in fix also `Edit` and `Write`. None of the actions lets it run a command, browse the web or start sub-agents, and none lets it read `/proc` or `/sys`, where the process's secrets are. What it needs from GitHub, such as the diff and the earlier reviews, a step fetches before it runs.
+  - The review runs [`src/review.ts`](src/review.ts) from the action itself, on Node from `actions/setup-node`, set up before the checkout. Its model gets read-only tools (`src/code-tools.ts`): every path stays inside the checkout, a symlink is followed and must land inside it, and `.env*`, `.dev.vars*` and `.git` files are never read, so a pull request cannot point the model at the process's secrets. git only lists and searches the checkout.
+  - Claude Code, in the other actions, loads no settings, hooks or MCP servers from the checkout (`--setting-sources user`, `--strict-mcp-config`, hooks off). Claude gets `Read`, `Glob` and `Grep`, and in fix also `Edit` and `Write`. None of them lets it run a command, browse the web or start sub-agents, and none lets it read `/proc` or `/sys`, where the process's secrets are. What it needs from GitHub, such as the diff and the earlier reviews, a step fetches before it runs.
   - Checkouts keep no token, and no step runs a file from the workspace.
-- **Claude answers; the action acts.** Claude has no GitHub tools: it answers in a fixed shape, and the steps after it decide what of that answer reaches the repository. The review is posted on the commit Claude read, and approves only with `approve`. The other steps write only what the configuration turned on, add only labels the repository has, name only issues and files that exist, and edit only rivi-bot's own comments and its own section of a description. Nothing is closed, and no label is taken off.
+- **The model answers; the action acts.** The models write nothing to GitHub: the review's can only search and read the repository's issues, and Claude has no GitHub tools. They answer in a fixed shape, and the steps after them decide what of that answer reaches the repository. The review is posted on the commit the model read, and approves only with `approve`. The other steps write only what the configuration turned on, add only labels the repository has, name only issues and files that exist, and edit only rivi-bot's own comments and its own section of a description. Nothing is closed, and no label is taken off.
+- **Labels for maintainers.** What Claude answers is shaped by text anyone can write, so a label that starts work, or records a maintainer's decision, could otherwise be added by an issue that asks for it. Describe, triage and housekeeping never add a label [`labels-deny`](#configuration) names, which by default holds back `needs-*`, `ready-for-*`, `duplicate`, `wontfix`, `invalid`, `breaking-change`, `good first issue` and `help wanted`, nor any of rivi-bot's own. Claude is shown only the labels it may add, and its answer is checked all the same, by one filter for all three ([`labels.jq`](labels.jq)). If your repository acts on another label, such as one that starts a workflow, add it to the list.
 - **Fix in two jobs.** Claude edits a checkout in a job with a read-only token. A second job, which never runs Claude, checks the patch, commits it and pushes. Whatever the first job leaves on its runner cannot reach the token that pushes. The second job pushes nothing under `.github/`, and the first refuses a patch with the API key in it.
 - **One commit.** The review reads `head-sha`, the commit the maintainer approved, and nothing pushed after it.
-- **Prompt injection.** Claude is told that what the pull request or issue contains is material, never instructions. Text in a pull request can still steer what a review says, so a review approves only a pull request by someone with write access, and only with `approve`. A fix takes in comments only from rivi-bot and people with write access. A request in plain words is routed by a call to Claude with no tools, which can pick only an action the person asking, who has write access, could have named.
+- **Prompt injection.** The models are told that what the pull request or issue contains is material, never instructions. Text in a pull request can still steer what a review says, so a review approves only a pull request by someone with write access, and only with `approve`. A fix takes in comments only from rivi-bot and people with write access. A request in plain words is routed by a call to Claude with no tools, which can pick only an action the person asking, who has write access, could have named.
 - **The gate.** On `pull_request_target`, `issues`, `issue_comment` and `pull_request_review_comment`, a workflow has your secrets for content from anyone. The reusable workflow reviews an outside pull request only after a maintainer adds the label or asks for a review, takes requests only from people with write access, and reads its configuration from the default branch. If you run an action yourself, run it on an outside pull request only after a maintainer approves (a label, as below, or an environment with required reviewers), never as soon as it opens. An approval can be good for one review, or stand until a maintainer takes it back, so that later pushes are reviewed too. A standing approval means each push spends up to a follow-up's budget on code nobody has read yet.
 
 ## The actions on their own
@@ -230,7 +252,7 @@ To pin an action, choose its other inputs, or decide yourself when it runs, use 
 | `rivi-software/tools/rivi-bot/ask` | [Ask](#ask) |
 | `rivi-software/tools/rivi-bot/housekeeping` | [Housekeeping](#housekeeping) |
 
-Each takes `anthropic-api-key`, `github-token` (`github.token` by default) and `model`, and its feature's settings from [the configuration](#configuration) as inputs of the same names; `action.yml` in its directory documents the rest. With an App, pass its installation token as `github-token`, and `<app-slug>[bot]` as `reviewer` or `login`.
+The review takes `cloudflare-account-id` and `cloudflare-ai-api-token`, and the others `anthropic-api-key`. Each takes `github-token` (`github.token` by default) and `model`, and its feature's settings from [the configuration](#configuration) as inputs of the same names; describe, triage and housekeeping also take `labels-deny`, one label a line. `action.yml` in its directory documents the rest. With an App, pass its installation token as `github-token`, and `<app-slug>[bot]` as `reviewer` or `login`.
 
 This workflow reviews a pull request once each time a maintainer adds the label:
 
@@ -244,7 +266,7 @@ jobs:
   review:
     if: github.event.label.name == 'rivi-bot:review'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     concurrency:
       group: review-${{ github.event.pull_request.number }}
     permissions:
@@ -260,7 +282,8 @@ jobs:
           case "$permission" in admin | maintain | write) ;; *) exit 1 ;; esac
       - uses: rivi-software/tools/rivi-bot@<commit sha> # or a rivi-bot-v* tag
         with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-ai-api-token: ${{ secrets.CLOUDFLARE_AI_API_TOKEN }}
           pull-request: ${{ github.event.pull_request.number }}
           head-sha: ${{ github.event.pull_request.head.sha }}
       - name: Take the label off
@@ -277,20 +300,23 @@ Taking the label off makes each approval good for one review: a later push needs
 
 | Input | Default | What |
 | --- | --- | --- |
-| `anthropic-api-key` | (required) | The key Claude runs on |
+| `cloudflare-account-id` | (required) | The Cloudflare account whose Workers AI the review runs on |
+| `cloudflare-ai-api-token` | (required) | A token of that account with **Workers AI Read**, and **AI Gateway Run** for an authenticated `ai-gateway` |
+| `ai-gateway` | | An AI Gateway of the account to send the calls through, for its logs (metadata only, never the text) and rate limits; without one, they go to Workers AI directly |
+| `cloudflare-ai-gateway-token` | | The gateway's own token, when the API token cannot run it |
 | `github-token` | `github.token` | Posts the review and fetches the history for a follow-up; needs contents read and pull-requests write |
 | `pull-request` | the event's pull request | The pull request to review |
 | `head-sha` | the event's head | The commit to review, normally the one a maintainer approved |
 | `reviewer` | `github-actions[bot]` | The login `github-token` posts as; a follow-up review starts from this login's last review |
 | `follow-up` | `true` | `false` reviews the whole pull request every time |
-| `approve` | `false` | `true` lets Claude approve when nothing has to change, and dismisses the reviewer's earlier approvals before a review of a later commit |
+| `approve` | `false` | `true` lets the review approve when the model found nothing that has to change, and dismisses the reviewer's earlier approvals before a review of a later commit |
 | `focus` | | What else your reviews look for |
 | `instructions` | | Instructions for this one review, which may narrow or steer it |
-| `model` | `claude-opus-5-5` | The Claude model |
+| `model` | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` | The Workers AI model, one that takes tools through Chat Completions |
 
 The output `reviewed` is `true` when a review was posted. The output `needs-changes` is `true` when the review found something that has to change before the pull request merges, and `false` when nothing has to, whatever `approve` is. With nothing new to review, it is the verdict of the reviewer's last review, which the action keeps in a hidden marker at the end of each review's body. The action itself does not fail on it: to fail the check, add a step after it that fails when `needs-changes` is `true`.
 
-The actions run on GitHub's Linux runners, which come with `gh`, `jq`, `yq` and `git`. They use [Claude Code's GitHub Action](https://github.com/anthropics/claude-code-action), pinned to a commit. They give it the Bun it pins from the npm registry, checked against a pinned integrity ([`install-bun.sh`](install-bun.sh)), so they do not depend on GitHub's release downloads; when the registry fails, the action downloads Bun from GitHub itself.
+The actions run on GitHub's Linux runners, which come with `gh`, `jq`, `yq` and `git`. The review sets up Node 24 with `actions/setup-node`, which stays on the job's `PATH` for the steps after it, and its script imports only Node's built-ins, so nothing is installed. The other actions use [Claude Code's GitHub Action](https://github.com/anthropics/claude-code-action), pinned to a commit. They give it the Bun it pins from the npm registry, checked against a pinned integrity ([`install-bun.sh`](install-bun.sh)), so they do not depend on GitHub's release downloads; when the registry fails, the action downloads Bun from GitHub itself.
 
 ## Versions
 

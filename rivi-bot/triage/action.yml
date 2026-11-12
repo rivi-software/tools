@@ -9,7 +9,7 @@ branding:
 # read files and nothing else: no commands, no edits, no GitHub tools. The steps after it decide
 # what of that answer reaches the issue: the sections this action is asked for, a duplicate only if
 # that issue exists, a file only if the checkout has it, and only labels the repository already
-# has. None is ever taken off.
+# has and labels-deny does not hold back. None is ever taken off.
 
 inputs:
   anthropic-api-key:
@@ -31,6 +31,18 @@ inputs:
     description: "`true` adds the repository's labels that fit."
     required: false
     default: "true"
+  labels-deny:
+    description: The labels never added, however well they fit, one a line, with `*` for any run of characters and in any case. rivi-bot's own labels (`rivi-bot:*`) are never added either.
+    required: false
+    default: |
+      needs-*
+      ready-for-*
+      duplicate
+      wontfix
+      invalid
+      breaking-change
+      good first issue
+      help wanted
   duplicates:
     description: "`true` names earlier issues that look like the same one."
     required: false
@@ -73,6 +85,7 @@ runs:
         GH_REPO: ${{ github.repository }}
         ISSUE: ${{ inputs.issue }}
         DUPLICATES: ${{ inputs.duplicates }}
+        LABELS_DENY: ${{ inputs.labels-deny }}
       run: |
         set -euo pipefail
         if [ -z "$ISSUE" ]; then
@@ -92,7 +105,12 @@ runs:
         dir="$RUNNER_TEMP/rivi-bot"
         rm -rf "$dir" && mkdir -p "$dir"
         gh issue view "$ISSUE" --json number,title,body,author,labels,createdAt,comments > "$dir/issue.json"
-        gh label list --limit 1000 --json name,description > "$dir/labels.json"
+        # Claude is shown only the labels it may add (rivi-bot/labels.jq); the step after it checks
+        # its answer against them all.
+        known="$RUNNER_TEMP/rivi-bot-labels.json"
+        gh label list --limit 1000 --json name,description > "$known"
+        jq -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
+          'include "labels"; addable($deny | deny_patterns)' "$known" > "$dir/labels.json"
         if [ "$DUPLICATES" = true ]; then
           gh issue list --state all --limit 500 --json number,title,state,labels --jq "map(select(.number != $ISSUE))" > "$dir/issues.json"
         else
@@ -101,6 +119,7 @@ runs:
         {
           echo "run=true"
           echo "dir=$dir"
+          echo "labels=$known"
         } >> "$GITHUB_OUTPUT"
 
     # The default branch, shallow, and without the token: Claude reads the files, nothing runs them.
@@ -150,7 +169,7 @@ runs:
         prompt: |
           Triage issue #${{ inputs.issue }} in ${{ github.repository }}, so that a maintainer can act on it quickly. The default branch is checked out here, shallow; read any file in it. Its guides (AGENTS.md, CONTRIBUTING.md and the READMEs, wherever they are) say how the project works. In ${{ steps.issue.outputs.dir }}:
           - issue.json: the issue and its comments
-          - labels.json: the repository's labels, with what each is for
+          - labels.json: the repository's labels you may add, with what each is for
           - issues.json: the repository's other issues, open and closed, most recent first
 
           Read the code the issue is about before you answer. Answer with these fields; a field you are not asked for, or have nothing for, is empty.
@@ -174,8 +193,10 @@ runs:
         LOGIN: ${{ inputs.login }}
         ISSUE: ${{ inputs.issue }}
         DIR: ${{ steps.issue.outputs.dir }}
+        KNOWN_LABELS: ${{ steps.issue.outputs.labels }}
         RESULT: ${{ steps.claude.outputs.structured_output }}
         LABELS: ${{ inputs.labels }}
+        LABELS_DENY: ${{ inputs.labels-deny }}
         DUPLICATES: ${{ inputs.duplicates }}
         QUESTIONS: ${{ inputs.questions }}
         PLAN: ${{ inputs.plan }}
@@ -229,11 +250,18 @@ runs:
           echo "Commented on #$ISSUE."
         fi
 
-        # Only labels the repository has, none of rivi-bot's own, and none already on.
+        # Only labels the repository has, none already on, and none labels-deny holds back
+        # (rivi-bot/labels.jq).
         if [ "$LABELS" = true ]; then
-          add=$(jq -c --slurpfile known "$DIR/labels.json" --slurpfile issue "$DIR/issue.json" '
-            ($known[0] | map(.name)) as $known | ($issue[0].labels | map(.name)) as $on
-            | [.labels | unique[] | select(IN($known[]) and (IN($on[]) | not) and (startswith("rivi-bot:") | not))]' <<< "$RESULT")
+          labels=$(jq -c -L "$GITHUB_ACTION_PATH/.." --arg deny "$LABELS_DENY" \
+            --slurpfile known "$KNOWN_LABELS" --slurpfile issue "$DIR/issue.json" '
+            include "labels";
+            .labels | labels_to_add($known[0] | map(.name); $issue[0].labels | map(.name); $deny | deny_patterns)' <<< "$RESULT")
+          add=$(jq -c .add <<< "$labels")
+          held=$(jq -r '.held | join(", ")' <<< "$labels")
+          if [ -n "$held" ]; then
+            echo "Left for a maintainer (labels-deny): $held."
+          fi
           if [ "$add" != "[]" ]; then
             jq -n --argjson labels "$add" '{labels: $labels}' |
               gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$ISSUE/labels" --input - --silent
