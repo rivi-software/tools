@@ -43,6 +43,13 @@ import type {
 /** The model a review runs on unless `MODEL` names another. */
 export const REVIEW_MODEL = "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
 
+/**
+ * The most tokens one answer takes. The model's reasoning counts toward it, and a long review's
+ * reasoning ran past 12,000 in one round. At the 130 or so tokens a second the model streamed then,
+ * this many take about 8 minutes, inside the 12 a call has (AI_LIMITS.answerMs).
+ */
+const MAX_TOKENS = 65_536;
+
 /** The most inline comments one review posts; the model is told so. */
 const MAX_COMMENTS = 25;
 
@@ -662,7 +669,7 @@ const reviewWithModel = async (reviewer: Reviewer): Promise<Submission> => {
       env,
       fetchImpl,
       {
-        max_tokens: 12_000,
+        max_tokens: MAX_TOKENS,
         messages,
         model,
         tool_choice: "auto",
@@ -698,7 +705,7 @@ const reviewWithModel = async (reviewer: Reviewer): Promise<Submission> => {
     env,
     fetchImpl,
     {
-      max_tokens: 12_000,
+      max_tokens: MAX_TOKENS,
       messages: [
         ...messages,
         {

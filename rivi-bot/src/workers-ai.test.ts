@@ -171,6 +171,22 @@ describe("a Workers AI answer", () => {
     ).rejects.toThrow(/used up max_tokens before it answered/u);
     await expect(
       answering(() =>
+        stream([
+          chunk({
+            tool_calls: [
+              {
+                function: { arguments: '{"path":"src/', name: "read_file" },
+                id: "c1",
+                index: 0,
+              },
+            ],
+          }),
+          chunk({}, "length"),
+        ])
+      )
+    ).rejects.toThrow(/used up max_tokens partway through its answer/u);
+    await expect(
+      answering(() =>
         stream([`data: ${JSON.stringify({ error: "overloaded" })}\n\n`])
       )
     ).rejects.toThrow('Workers AI @cf/x/y failed mid-answer: "overloaded"');
