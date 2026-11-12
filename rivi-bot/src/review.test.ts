@@ -205,6 +205,7 @@ interface SentBody {
   model?: string;
   stream?: boolean;
   messages?: { role: string; content: string; tool_call_id?: string }[];
+  tool_choice?: string;
   tools?: { function: { name: string } }[];
 }
 
@@ -756,7 +757,7 @@ describe("a follow-up review", () => {
     expect(reviewsPosted(calls)[0]?.body).toMatch(/the changes since ddddddd/u);
   });
 
-  it("offers every tool for its rounds, then submit_review alone in one last call", () => {
+  it("offers every tool for its rounds, then submit_review alone in one last call that has to call it", () => {
     const ai = aiCalls(calls);
     const last = ai.at(-1)?.body;
 
@@ -765,6 +766,11 @@ describe("a follow-up review", () => {
       1,
     ]);
     expect(last?.tools?.[0]?.function.name).toBe("submit_review");
+    // A model may answer the last call in words unless a tool call is required.
+    expect(ai.map((call) => call.body?.tool_choice)).toStrictEqual([
+      ...Array.from({ length: BUDGETS.changes.rounds }, () => "auto"),
+      "required",
+    ]);
     // The last call carries every round's tool answer, and says it has no more rounds.
     expect(last?.messages?.filter((m) => m.role === "tool")).toHaveLength(
       BUDGETS.changes.rounds
@@ -784,7 +790,7 @@ describe("a review that goes wrong", () => {
     });
 
     await expect(run(env(), { fetchImpl, log: quiet })).rejects.toThrow(
-      /submitted no review in 16 rounds/u
+      /submitted no review in 16 rounds\. Its last answer was words: Looks fine\.$/u
     );
     expect(reviewsPosted(calls)).toStrictEqual([]);
     // An answer in words is asked to submit.
