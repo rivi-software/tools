@@ -605,6 +605,15 @@ describe(checkWorkerBundle, () => {
           secretPatterns: [{ name: "any", pattern: /x*/u }],
         })
       ).rejects.toThrow("The secret pattern any matches an empty string.");
+      await expect(
+        checkWorkerBundle({
+          ...options,
+          // @ts-expect-error A configuration file in JavaScript can pass a verify of any type.
+          secretPatterns: [{ name: "any", pattern: /x/u, verify: true }],
+        })
+      ).rejects.toThrow(
+        "The secret pattern any has a verify that is not a function."
+      );
     });
 
     it("says when the build is missing", async () => {

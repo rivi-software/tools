@@ -1,3 +1,5 @@
+import { crc32 } from "node:zlib";
+
 import { describe, expect, it } from "vitest";
 
 import { findSecrets, fingerprint, SECRET_PATTERNS } from "../src/secrets.js";
@@ -10,6 +12,14 @@ const join = (...parts: string[]) => parts.join("");
 
 const alnum = (length: number) =>
   "aB3dE5fG7hJ9kL2mN4pQ6rS8tU0vW1xY".repeat(8).slice(0, length);
+
+/** A Cloudflare credential whose last 8 characters are the CRC32 of the 40 before them. */
+const withChecksum = (prefix: string, body = alnum(40)) =>
+  join(prefix, body, crc32(body).toString(16).padStart(8, "0"));
+
+/** The value with its last hexadecimal digit changed. */
+const offByOne = (value: string) =>
+  `${value.slice(0, -1)}${value.endsWith("0") ? "1" : "0"}`;
 
 const SAMPLES = {
   "private key": join(
@@ -46,13 +56,8 @@ const SAMPLES = {
   "Shopify access token": join("sh", "pat_", "0123456789abcdef".repeat(2)),
   "Linear API key": join("li", "n_api_", alnum(40)),
   "Hugging Face token": join("h", "f_", alnum(34)),
-  "Cloudflare API credential": join("cf", "ut_", alnum(40), "3f9a0c7e"),
-  "Cloudflare Access service token secret": join(
-    "cf",
-    "ast_",
-    alnum(40),
-    "3f9a0c7e"
-  ),
+  "Cloudflare API credential": withChecksum(join("cf", "ut_")),
+  "Cloudflare Access service token secret": withChecksum(join("cf", "ast_")),
 } satisfies Record<string, string>;
 
 describe("the secret patterns", () => {
@@ -96,7 +101,7 @@ describe("the secret patterns", () => {
   it.for(["k", "ut", "at"])(
     "finds a Cloudflare API credential that starts cf%s_",
     (kind) => {
-      const value = join("cf", kind, "_", alnum(40), "3f9a0c7e");
+      const value = withChecksum(join("cf", kind, "_"));
       expect(
         findSecrets(`const t=${JSON.stringify(value)};`, SECRET_PATTERNS).map(
           ({ name }) => name
@@ -106,23 +111,63 @@ describe("the secret patterns", () => {
   );
 
   it("passes what is a character off a Cloudflare credential", () => {
-    const checksum = "3f9a0c7e";
-
     const code = [
       // prefixes Cloudflare does not issue
-      join("cf", "x_", alnum(40), checksum),
-      join("cf", "as_", alnum(40), checksum),
+      withChecksum(join("cf", "x_")),
+      withChecksum(join("cf", "as_")),
       // a body a character short, or a character long
-      join("cf", "ut_", alnum(39), checksum),
-      join("cf", "ast_", alnum(39), checksum),
-      join("cf", "at_", alnum(41), checksum),
+      withChecksum(join("cf", "ut_"), alnum(39)),
+      withChecksum(join("cf", "ast_"), alnum(39)),
+      withChecksum(join("cf", "at_"), alnum(41)),
       // a checksum that is not hexadecimal
       join("cf", "k_", alnum(40), "3f9a0c7z"),
       // the prefix inside a word
-      join("x", "cf", "ut_", alnum(40), checksum),
+      join("x", withChecksum(join("cf", "ut_"))),
     ].join("\n");
 
     expect(findSecrets(code, SECRET_PATTERNS)).toStrictEqual([]);
+  });
+
+  it.for([
+    ["ut", "Cloudflare API credential"],
+    ["at", "Cloudflare API credential"],
+    ["ast", "Cloudflare Access service token secret"],
+  ])(
+    "finds a cf%s_ value whose checksum holds, and passes one whose checksum is wrong",
+    ([kind, name]) => {
+      const value = withChecksum(join("cf", kind, "_"));
+
+      expect(
+        findSecrets(
+          `const a=${JSON.stringify(value)},b=${JSON.stringify(offByOne(value))};`,
+          SECRET_PATTERNS
+        )
+      ).toStrictEqual([
+        expect.objectContaining({ name, fingerprint: fingerprint(value) }),
+      ]);
+    }
+  );
+
+  it("finds a Global API key by its shape alone", () => {
+    const value = offByOne(withChecksum(join("cf", "k_")));
+
+    expect(
+      findSecrets(`const t=${JSON.stringify(value)};`, SECRET_PATTERNS).map(
+        ({ name }) => name
+      )
+    ).toStrictEqual(["Cloudflare API credential"]);
+  });
+
+  it("leaves out a match that its pattern's verify rejects", () => {
+    const pattern = {
+      name: "service token",
+      pattern: /\bsvc_[a-z]\b/u,
+      verify: (value: string) => value !== "svc_b",
+    };
+
+    expect(
+      findSecrets("svc_a svc_b svc_c", [pattern]).map(({ column }) => column)
+    ).toStrictEqual([0, 12]);
   });
 
   it("finds a private key written over lines, or escaped twice", () => {

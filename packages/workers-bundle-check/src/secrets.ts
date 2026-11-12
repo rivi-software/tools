@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { crc32 } from "node:zlib";
 
 import { describePattern, moduleMatcher } from "./modules.js";
 import type { ModulePattern } from "./modules.js";
@@ -9,7 +10,20 @@ export interface SecretPattern {
   name: string;
   /** What the value looks like. It must not match an empty string. */
   pattern: RegExp;
+  /**
+   * Whether a value the pattern matched is one, such as by its checksum. A value it rejects is
+   * not reported. Without it, every match is.
+   */
+  verify?: (value: string) => boolean;
 }
+
+/**
+ * Whether a Cloudflare credential ends in the CRC32 of the 40 characters before its last 8, in
+ * lowercase hexadecimal. Throwaway tokens of each kind it checks showed that the sum covers
+ * those 40 characters, not the prefix.
+ */
+const hasCloudflareChecksum = (value: string): boolean =>
+  crc32(value.slice(-48, -8)).toString(16).padStart(8, "0") === value.slice(-8);
 
 /**
  * The key formats the check looks for. Each has a prefix or a structure of its own, so text that
@@ -60,14 +74,19 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   { name: "Linear API key", pattern: /\blin_api_[A-Za-z0-9]{40}\b/u },
   { name: "Hugging Face token", pattern: /\bhf_[A-Za-z0-9]{34,}\b/u },
   // Cloudflare's prefixed formats: 40 alphanumeric characters, then a checksum of 8 hex digits.
-  // A Global API key is cfk_, a user API token cfut_ and an account API token cfat_.
+  // A Global API key is cfk_, a user API token cfut_ and an account API token cfat_. A kind gets
+  // its checksum checked once a real token of that kind has shown what the sum covers: a wrong
+  // check would hide a real credential. No Global API key has, so a cfk_ value is matched by its
+  // shape alone.
   {
     name: "Cloudflare API credential",
     pattern: /\bcf(?:k|ut|at)_[A-Za-z0-9]{40}[a-f0-9]{8}\b/u,
+    verify: (value) => value.startsWith("cfk_") || hasCloudflareChecksum(value),
   },
   {
     name: "Cloudflare Access service token secret",
     pattern: /\bcfast_[A-Za-z0-9]{40}[a-f0-9]{8}\b/u,
+    verify: hasCloudflareChecksum,
   },
 ];
 
@@ -142,14 +161,14 @@ export const findSecrets = (
   const findings: SecretFinding[] = [];
   let lines: number[] | undefined;
 
-  for (const { name, pattern } of patterns) {
+  for (const { name, pattern, verify } of patterns) {
     const global = new RegExp(
       pattern.source,
       `${pattern.flags.replaceAll(/[gy]/gu, "")}g`
     );
 
     for (const match of text.matchAll(global)) {
-      if (!match[0]) {
+      if (!match[0] || (verify && !verify(match[0]))) {
         continue;
       }
 
@@ -210,14 +229,24 @@ export const validateAllowedSecrets = (
   }
 };
 
-/** Throws when a secret pattern has no name, or matches the empty string. */
+/**
+ * Throws when a secret pattern has no name, matches the empty string, or has a `verify` that is
+ * not a function.
+ */
 export const validateSecretPatterns = (
   patterns: readonly SecretPattern[]
 ): void => {
-  for (const { name, pattern } of patterns) {
+  for (const { name, pattern, verify } of patterns) {
     if (!name?.trim() || !(pattern instanceof RegExp)) {
       throw new TypeError(
         `A secret pattern needs a name and a regular expression: ${name}.`
+      );
+    }
+
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- a configuration file in JavaScript can pass a verify of any type
+    if (verify !== undefined && typeof verify !== "function") {
+      throw new TypeError(
+        `The secret pattern ${name} has a verify that is not a function.`
       );
     }
 

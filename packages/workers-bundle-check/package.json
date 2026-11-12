@@ -41,7 +41,7 @@
     "wrangler": "4.156.2"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.2"
   },
   "repository": {
     "type": "git",
