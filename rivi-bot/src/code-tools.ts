@@ -30,7 +30,9 @@ const SEARCH_EXCLUDES = [
 /** A `git grep -n` line's path: what comes before its line number. */
 const GREP_PATH = /^(?<path>.*?):\d+:/u;
 
-// A search names this repository; a qualifier that reaches past it is refused.
+// A search names this repository. A qualifier that reaches past it is refused as a hint to the
+// model; what keeps other repositories out is that every result from one is dropped, since
+// GitHub's search syntax (`OR`, parentheses) has more ways to name one than a pattern can catch.
 const OTHER_REPOSITORY = /(?:^|\s)-?(?:repo|org|user|owner):/iu;
 
 type Exec = typeof execFileSync;
@@ -54,6 +56,7 @@ interface SearchResults {
     state: string;
     title: string;
     pull_request?: unknown;
+    repository_url?: string;
   }[];
 }
 
@@ -310,8 +313,11 @@ export const codeTools = (
           `/search/issues?per_page=10&q=${encodeURIComponent(`repo:${repo} ${query}`)}`
         );
 
+        const own = `https://api.github.com/repos/${repo}`.toLowerCase();
+
         return (
           found.items
+            .filter((i) => i.repository_url?.toLowerCase() === own)
             .map(
               (i) =>
                 `#${i.number} [${i.state}${i.pull_request ? ", pull request" : ""}] ${i.title}`

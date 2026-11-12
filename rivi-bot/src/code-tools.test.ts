@@ -107,7 +107,23 @@ describe("the code tools", () => {
     asked.push(`${method} ${endpoint}`);
 
     const answer = endpoint.startsWith("/search/")
-      ? { items: [{ number: 3, state: "open", title: "Totals overflow" }] }
+      ? {
+          // A query can name another repository in ways the hint misses; its results are dropped.
+          items: [
+            {
+              number: 3,
+              repository_url: "https://api.github.com/repos/o/r",
+              state: "open",
+              title: "Totals overflow",
+            },
+            {
+              number: 9,
+              repository_url: "https://api.github.com/repos/o/private",
+              state: "open",
+              title: "Private plans",
+            },
+          ],
+        }
       : {
           body: "Steps.",
           labels: [],
@@ -170,9 +186,14 @@ describe("the code tools", () => {
     await expect(
       tools.call("search_issues", { query: "totals repo:o/private" })
     ).resolves.toMatch(/^Search this repository only/u);
+    // Past the hint, as `OR (repo:…)`, another repository's results are still dropped.
+    await expect(
+      tools.call("search_issues", { query: "totals OR (repo:o/private plans)" })
+    ).resolves.toBe("#3 [open] Totals overflow");
     expect(asked).toStrictEqual([
       `GET /search/issues?per_page=10&q=${encodeURIComponent("repo:o/r totals")}`,
       "GET /issues/3",
+      `GET /search/issues?per_page=10&q=${encodeURIComponent("repo:o/r totals OR (repo:o/private plans)")}`,
     ]);
   });
 });
