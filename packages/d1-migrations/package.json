@@ -51,7 +51,7 @@
     }
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261104.1",
+    "@cloudflare/workers-types": "5.20261106.1",
     "miniflare": "5.20261102.0-beta",
     "wrangler": "4.158.0"
   },
