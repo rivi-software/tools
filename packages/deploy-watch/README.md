@@ -11,7 +11,7 @@ This package notices the deploy in the browser and moves the tab on:
 - a notice can offer the reload, only when the deploy changed the module on screen if you name your modules
 - an error screen that caught a missing chunk reloads instead of showing
 
-A deploy that leaves every browser file as it was (a server-only commit, in an app whose browser code does not carry the commit) does none of these.
+A deploy that leaves every browser file as it was (a server-only commit, in an app whose browser code does not carry the commit) does none of these. PostHog's source map upload writes the release into every browser file, so with it every deploy does (see [With PostHog's source map upload](#with-posthogs-source-map-upload)).
 
 ## Install
 
@@ -89,6 +89,15 @@ deployWatch({
 
 Then give the notice the module the page shows: `useNewBuildNotice({ module: "inbox" })`. It shows once a deploy changed that module's code, and also while the tab cannot tell (below). `{ module: null }` is a page in no module, where it never shows. A deploy that changed other code still reaches the tab at its next move. Dismissed, the notice shows again once a later deploy changes the module again.
 
+### With PostHog's source map upload
+
+PostHog's source map plugin, `@posthog/rollup-plugin`, writes a snippet into every browser chunk. [`posthogSourcemaps`](https://github.com/rivi-software/tools/tree/main/packages/posthog-tanstack-start#how-it-works) in `@rivi-software/posthog-tanstack-start` adds it to the build when `POSTHOG_PERSONAL_API_KEY` is set.
+
+- In event mode, the plugin's default, the snippet holds the id of the release, and the release's version is the commit. Two builds of one commit stay the same, but every commit renames every chunk, a server-only commit too.
+- In symbol-set mode (`releaseMode: "symbol-set"`), the snippet holds a random id, so even two builds of one commit rename every chunk.
+- Either way, `client` changes with every deploy that uploads source maps. Every open tab loads the whole page at its next navigation, and a notice without `module` shows after every deploy.
+- A module's fingerprint reads the snippet without its ids, so `useNewBuildNotice({ module })` still shows only once a deploy changed that module's code.
+
 ## How it works
 
 - **The build's id.** The Vite plugin gives each build the `buildId` option, or else the commit CI builds, from the first of these that is set: `WORKERS_CI_COMMIT_SHA` (Cloudflare Workers Builds), `CF_PAGES_COMMIT_SHA` (Cloudflare Pages), `GITHUB_SHA` (GitHub Actions) and `CI_COMMIT_SHA` (GitLab CI, and the services that use its name). Elsewhere, pass the commit as `buildId`.
@@ -103,6 +112,7 @@ Then give the notice the module the page shows: `useNewBuildNotice({ module: "in
   - `client` covers the name and the exact content of every file of the browser build but source maps and Vite's manifests in `.vite/`. Two builds have the same `client` only when they serve the same files, so a tab on one can load every chunk it needs from the other. An app that writes its commit into its browser code gets a new `client` with every commit.
   - With `modules`, each named module's fingerprint covers what its lazily loaded files bring beyond the page that loads them: the files they import, statically or lazily, less the entry's own files and what the importers' chunks import statically. Code every page already has, such as the shell's own components, is in no module.
   - A module's fingerprint decides only whether the notice shows, so it reads what the code does. Rollup renames a chunk when any chunk it imports, even lazily, was renamed, so one changed file renames most of a bundle. The module fingerprint reads each file's content with every name of a file in the bundle taken out, and with the build's id too (the whole id, or its first seven characters alone), since an app may write its release into its code for error reports. A `buildId` shorter than seven characters, such as a CI build number, is not taken out.
+  - It also reads the snippet that PostHog's source map plugin writes into each chunk without the release's id and the chunk's id, and leaves out the chunk's `//# chunkId=` comment (see _With PostHog's source map upload_ above).
 - **The page's id.** `BuildMeta` renders `<meta name="deploy-watch-build">` in the document's head on the server. In the browser it reads the tag back, so hydration matches.
 - **The check.** `startDeployWatch()` reads `build.json` (`no-store`, without cookies, giving up after 10 s):
   - once soon after the page loads, when the browser is idle (or after 2 s where it cannot say)

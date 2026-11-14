@@ -1,8 +1,16 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import posthogRollupPlugin from "@posthog/rollup-plugin";
 import { build, createBuilder, createLogger } from "vite";
 import type { Plugin } from "vite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -82,11 +90,15 @@ interface BuildFileBody {
   modules?: Record<string, string>;
 }
 
-/** Builds `APP` with `changes` applied, and reads its `build.json`; `seen` collects what `modules` saw. */
+/**
+ * Builds `APP` with `changes` applied, and `plugins` beside deploy-watch, and reads its
+ * `build.json`; `seen` collects what `modules` saw.
+ */
 const buildApp = async (
   changes: Record<string, string> = {},
   seen: { id: string; importers: readonly string[] }[] = [],
-  buildId = "abc123"
+  buildId = "abc123",
+  plugins: Plugin[] = []
 ): Promise<BuildFileBody> => {
   const app = mkdtempSync(path.join(tmpdir(), "deploy-watch-app-"));
 
@@ -110,6 +122,7 @@ const buildApp = async (
               ?.module;
           },
         }),
+        ...plugins,
       ],
       build: {
         write: false,
@@ -130,12 +143,44 @@ const buildApp = async (
   }
 };
 
+/**
+ * A stand-in for posthog-cli, which the PostHog plugin runs in event mode to resolve the release:
+ * like PostHog's API, it answers one id for each release name and version.
+ */
+const POSTHOG_CLI = [
+  "#!/usr/bin/env node",
+  'const { createHash } = require("node:crypto");',
+  "const args = process.argv.slice(2);",
+  'if (args[0] === "release" && args[1] === "resolve") {',
+  '  process.stdout.write(createHash("sha256").update(args.join(" ")).digest("hex").slice(0, 32));',
+  "}",
+].join("\n");
+
+let posthogCli: string;
+
+/**
+ * PostHog's source map plugin, as `posthogSourcemaps` in posthog-tanstack-start adds it to the
+ * browser build, for release `commit`. It writes a snippet with a chunk id into every chunk, and
+ * in event mode, its default, the release's id too.
+ */
+const posthog = (releaseMode: "event" | "symbol-set", commit: string): Plugin =>
+  // SAFETY: the rollup plugin is a Vite plugin too; its own types do not say so.
+  posthogRollupPlugin({
+    personalApiKey: "phx_test",
+    projectId: "1",
+    cliBinaryPath: posthogCli,
+    sourcemaps: { releaseName: "web", releaseVersion: commit, releaseMode },
+  }) as Plugin;
+
 describe("the Vite plugin in a real build", () => {
   // A consumer's project with the package as npm installs it: built files in a real node_modules
   // directory, which a server build leaves external unless told otherwise. (A workspace link
   // resolves outside node_modules, is bundled as source, and hides the difference.)
   beforeAll(() => {
     root = mkdtempSync(path.join(tmpdir(), "deploy-watch-build-"));
+    posthogCli = path.join(root, "posthog-cli");
+    writeFileSync(posthogCli, POSTHOG_CLI);
+    chmodSync(posthogCli, 0o755);
 
     const installed = path.join(
       root,
@@ -352,5 +397,48 @@ describe("the Vite plugin in a real build", () => {
     const second = await buildApp(numbered("242"), [], "42");
     expect(second.modules?.kb).not.toBe(first.modules?.kb);
     expect(second.modules?.inbox).toBe(first.modules?.inbox);
+  }, 60_000);
+
+  it("PostHog's release snippet changes the client with each release, but no module's fingerprint", async () => {
+    const first = "4f1c9e2aa07b5d3e8c6f1a2b3c4d5e6f7a8b9c0d";
+    const second = "b83d05f6c1e2a4b6c8d0e2f4a6b8c0d2e4f6a8b0";
+    const event = await buildApp({}, [], first, [posthog("event", first)]);
+
+    const nextEvent = await buildApp({}, [], second, [
+      posthog("event", second),
+    ]);
+
+    const symbols = await buildApp({}, [], first, [
+      posthog("symbol-set", first),
+    ]);
+
+    const again = await buildApp({}, [], first, [posthog("symbol-set", first)]);
+
+    const dialog = await buildApp(
+      { "modules/inbox-dialog.js": 'export const text = "Reply";' },
+      [],
+      second,
+      [posthog("event", second)]
+    );
+
+    expect({
+      // Event mode writes the release's id into every chunk, and a server-only commit is another
+      // release: every chunk gets another name, but no module's code changed.
+      eventClient: nextEvent.client === event.client,
+      eventModules: nextEvent.modules,
+      // Symbol-set mode writes a random chunk id, so even two builds of one commit differ.
+      symbolsClient: again.client === symbols.client,
+      symbolsModules: again.modules,
+      // A change to a module's code still shows through the snippet.
+      dialogInbox: dialog.modules?.inbox === event.modules?.inbox,
+      dialogKb: dialog.modules?.kb === event.modules?.kb,
+    }).toStrictEqual({
+      eventClient: false,
+      eventModules: event.modules,
+      symbolsClient: false,
+      symbolsModules: symbols.modules,
+      dialogInbox: false,
+      dialogKb: true,
+    });
   }, 60_000);
 });
