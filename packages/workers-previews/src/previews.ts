@@ -3,10 +3,12 @@ import type { CloudflareApi } from "@rivi-software/cloudflare-deploy/cloudflare-
 
 import {
   activeBuilds,
+  blocksBranch,
   deletePreview,
   listPreviews,
   workerTag,
 } from "./cloudflare.js";
+import type { BuildInfo } from "./cloudflare.js";
 import { previewName } from "./name.js";
 import { planSweep } from "./sweep.js";
 import type { RepositoryState, SweepEntry, SweepTarget } from "./sweep.js";
@@ -51,17 +53,15 @@ const cachedTag = (api: CloudflareApi, worker: string) => {
   return tag;
 };
 
-/** Throws while a Workers Build of `branch` (of any branch, when left out) has not finished. */
-const assertBuildsIdle = async (target: PreviewsTarget, branch?: string) => {
-  if (target.builds === false) {
-    return;
-  }
-
+/** The Worker's Workers Builds that have not finished, of every branch. */
+const readActiveBuilds = async (
+  target: PreviewsTarget,
+  builds: CloudflareApi
+) => {
   const tag = await cachedTag(target.api, target.worker);
-  let active;
 
   try {
-    active = await activeBuilds(target.builds ?? target.api, tag, branch);
+    return await activeBuilds(builds, tag);
   } catch (error) {
     if (
       !(error instanceof CloudflareApiError) ||
@@ -75,12 +75,56 @@ const assertBuildsIdle = async (target: PreviewsTarget, branch?: string) => {
       { cause: error }
     );
   }
+};
 
-  if (active.length) {
-    throw new Error(
-      `A Workers Build ${branch === undefined ? "of the Worker" : `of ${branch}`} is ${active[0].status} (${active[0].build_uuid}): wait for it to finish, then delete again`
-    );
-  }
+/** Throws while a Workers Build of `branch` (of any branch, when left out) has not finished. */
+type BuildCheck = (branch?: string) => Promise<void>;
+
+/** How long the sweep checks its targets against one read of the Worker's builds. */
+const SWEEP_BUILDS_MAX_AGE_MS = 30_000;
+
+/**
+ * A build check that reads the Worker's builds again only once its last read is `maxAge`
+ * milliseconds old, timed from when that read started; with the default 0, every check reads them.
+ * It refuses only on a read of its own, so a build that finished since an older read holds nothing
+ * up. Calls must not overlap.
+ */
+const buildCheck = (target: PreviewsTarget, maxAge = 0): BuildCheck => {
+  const builds = target.builds ?? target.api;
+  let last: { startedAt: number; active: BuildInfo[] } | undefined;
+
+  return async (branch) => {
+    if (builds === false) {
+      return;
+    }
+
+    const read = async () => {
+      const startedAt = Date.now();
+      last = { startedAt, active: await readActiveBuilds(target, builds) };
+
+      return last.active;
+    };
+
+    const cached =
+      last !== undefined && Date.now() - last.startedAt < maxAge
+        ? last.active
+        : undefined;
+
+    const blockedBy = (active: BuildInfo[]) =>
+      active.find((build) => blocksBranch(build, branch));
+
+    let blocking = blockedBy(cached ?? (await read()));
+
+    if (blocking && cached) {
+      blocking = blockedBy(await read());
+    }
+
+    if (blocking) {
+      throw new Error(
+        `A Workers Build ${branch === undefined ? "of the Worker" : `of ${branch}`} is ${blocking.status} (${blocking.build_uuid}): wait for it to finish, then delete again`
+      );
+    }
+  };
 };
 
 const deleteNames = async (target: PreviewsTarget, names: string[]) => {
@@ -101,6 +145,7 @@ const deleteNames = async (target: PreviewsTarget, names: string[]) => {
 
 const deleteBranch = async (
   target: PreviewsTarget,
+  check: BuildCheck,
   branch: string,
   keep: Set<string>
 ) => {
@@ -108,7 +153,7 @@ const deleteBranch = async (
     productionBranch: target.productionBranch,
   });
 
-  await assertBuildsIdle(target, branch);
+  await check(branch);
 
   return deleteNames(
     target,
@@ -118,11 +163,12 @@ const deleteBranch = async (
 
 const deleteName = async (
   target: PreviewsTarget,
+  check: BuildCheck,
   name: string,
   builds: "all" | "none"
 ) => {
   if (builds === "all") {
-    await assertBuildsIdle(target);
+    await check();
   }
 
   return deleteNames(target, [name]);
@@ -131,12 +177,13 @@ const deleteName = async (
 /** The Previews one target of the sweep clears. */
 const deleteTarget = (
   target: PreviewsTarget,
+  check: BuildCheck,
   sweep: SweepTarget,
   keep: Set<string>
 ) =>
   "branch" in sweep && sweep.branch !== undefined
-    ? deleteBranch(target, sweep.branch, keep)
-    : deleteName(target, sweep.name, sweep.builds);
+    ? deleteBranch(target, check, sweep.branch, keep)
+    : deleteName(target, check, sweep.name, sweep.builds);
 
 const inventory = async (
   target: PreviewsTarget & {
@@ -186,7 +233,8 @@ export const targetLabel = (target: SweepTarget): string =>
 export const deleteBranchPreviews = (
   target: PreviewsTarget,
   branch: string
-): Promise<string[]> => deleteBranch(target, branch, new Set());
+): Promise<string[]> =>
+  deleteBranch(target, buildCheck(target), branch, new Set());
 
 /** The Worker's Previews, each with its owner, whether its branch is live, and the sweep's verdict. */
 export const previewInventory = async (
@@ -216,7 +264,9 @@ export interface SweepResult {
  * Compares every Preview of the Worker with the repository's branches and pull requests, and with
  * `apply` deletes the stale ones (`planSweep`). Reads the Previews, then the repository, both before
  * it deletes anything, and throws when either may be incomplete. One target's failed delete, such as a branch whose build is
- * running, does not stop the rest: the result lists it under `failed`.
+ * running, does not stop the rest: the result lists it under `failed`. Checks every target against
+ * one read of the Worker's Workers Builds, and reads them again once that read is 30 seconds old,
+ * and before a delete it would refuse.
  */
 export const sweepPreviews = async (
   target: PreviewsTarget & {
@@ -233,11 +283,12 @@ export const sweepPreviews = async (
   }
 
   const keep = new Set(target.keep);
+  const check = buildCheck(target, SWEEP_BUILDS_MAX_AGE_MS);
 
   for (const sweep of targets) {
     try {
       // oxlint-disable-next-line eslint/no-await-in-loop -- one target at a time: a branch's build check must not race another's delete
-      const deleted = await deleteTarget(target, sweep, keep);
+      const deleted = await deleteTarget(target, check, sweep, keep);
       result.deleted.push(...deleted);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

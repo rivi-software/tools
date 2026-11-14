@@ -203,7 +203,7 @@ The sweep deletes nothing when:
 - GitHub's branches or open pull requests run past 100 pages of 100. It follows GitHub's `Link` header, and reads on after a full page even without one.
 - The branches lack the production branch: the token reads another repository, or `--production-branch` is wrong.
 
-`delete`, and the sweep for each branch, first ask the Workers Builds API for the Worker's builds of the last 90 days. A build of the branch that is queued, initializing or running stops the delete, and so does one that names no branch. A hashed name whose branch is unknown waits for every build of the Worker. A Worker that Workers Builds never built has none.
+`delete`, and the sweep for each branch, first ask the Workers Builds API for the Worker's builds of the last 90 days. A build of the branch that is queued, initializing or running stops the delete, and so does one that names no branch. A hashed name whose branch is unknown waits for every build of the Worker. A Worker that Workers Builds never built has none. `delete` reads the builds each time. `sweep --apply` reads them once and checks every branch against that list. It reads them again whenever the list is 30 seconds old, and before it refuses a delete, so a build that finished since the read holds nothing up.
 
 ## From code
 
@@ -240,7 +240,7 @@ The function must return every live branch and every open pull request, and thro
 
 - **The hash is 48 bits.** Two branches could in principle share a name; among a few thousand branches the odds are below one in ten million.
 - **A raw name is a branch name.** A Preview named by hand, not after a branch, looks like a deleted branch's to the sweep. Keep it with `--keep <name>`.
-- **The build check can be overtaken.** A build that starts after the check and before the delete brings its Preview back. The next sweep removes it again, once the branch is stale.
+- **The build check can be overtaken.** A build that starts after the check and before the delete brings its Preview back. For the sweep, the check is the last read of the builds, up to 30 seconds before the delete. The next sweep removes the Preview again, once the branch is stale.
 - **GitHub only, on the command line.** For another host, call `sweepPreviews` with your own `repository` function.
 - **Just the Preview.** Deleting a Preview deletes its deployments. A container app it ran stays, as do any resources a Preview made for itself, such as a database; see Cloudflare's [Resources and isolation](https://developers.cloudflare.com/workers/previews/resources/).
 
