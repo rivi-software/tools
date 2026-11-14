@@ -1,5 +1,11 @@
 # @rivi-software/workers-bundle-check
 
+## 0.3.2
+
+### Patch Changes
+
+- cee8392: Depend on `minimatch` 11.0.5 or later instead of 11.0.4. Globs match the same files as before, and a pattern with a numeric brace range of 100 or more values, such as `{0..999}`, compiles faster.
+
 ## 0.3.1
 
 ### Patch Changes
