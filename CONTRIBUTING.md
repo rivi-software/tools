@@ -48,6 +48,8 @@ pnpm run verify
 
 `verify` runs what CI runs, in order: `check:manifests`, `format:check`, `lint` (Oxlint), `check` (TypeScript), `test` (Vitest), `build` and `check:packages`. `pnpm run format` formats the code with Oxfmt. In a package, `pnpm run test`, `pnpm run check` and `pnpm run build` run its own.
 
+`pnpm install` also installs a pre-commit hook with [Lefthook](https://lefthook.dev), set up in `lefthook.yml`. On each commit it formats the staged files with Oxfmt and stages the result, lints them with Oxlint, runs `check` when a TypeScript file is staged, and runs `check:manifests`. A failure stops the commit. The tests and the build stay in `verify`. `git commit --no-verify` skips the hook for one commit.
+
 The lint and format rules are [Ultracite](https://www.ultracite.ai)'s presets: `oxlint.config.ts` extends its `core`, `react`, `tanstack`, `vitest` and `anti-slop` presets, and `oxfmt.config.ts` takes its formatting, leaving Markdown and JSON alone. `pnpm run fix` applies Oxlint's fixes, then Oxfmt. It holds back (`-A`) the fixes that would change what the code does or what a package declares, such as `unicorn/prefer-type-error`, which changes the class of a thrown error, and `unicorn/prefer-number-coercion`, which reads `"4.1.12"` as `NaN`. `pnpm run lint` still reports those rules. When a rule is wrong for one line, suppress that line and say why: `// oxlint-disable-next-line eslint/no-await-in-loop -- each page needs the cursor of the page before`. A type assertion needs a `// SAFETY:` comment just before its statement that names what makes it hold.
 
 ### Making the change

@@ -11,6 +11,9 @@ allowBuilds:
   # esbuild and workerd (through wrangler and miniflare, which @rivi-software/d1-migrations tests
   # against) take their binaries from optional platform packages; the scripts only check them.
   esbuild: false
+  # lefthook's script runs `lefthook install`, which installs the Git hooks in lefthook.yml. It
+  # takes its binary from optional platform packages, and skips the install in CI.
+  lefthook: true
   workerd: false
 
 # Supply-chain policy: no transitive dependencies from git or tarball URLs.
