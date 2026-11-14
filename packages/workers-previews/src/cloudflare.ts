@@ -130,6 +130,16 @@ export const workerTag = async (
 };
 
 /**
+ * Whether a build has not finished and holds up `branch` (any branch, when left out). A build
+ * without branch metadata holds up every branch.
+ */
+export const blocksBranch = (build: BuildInfo, branch?: string): boolean =>
+  build.status !== "stopped" &&
+  (branch === undefined ||
+    build.build_trigger_metadata?.branch === undefined ||
+    build.build_trigger_metadata.branch === branch);
+
+/**
  * The Worker's Workers Builds that have not finished: of `branch`, or of any branch when it is
  * left out. A build without branch metadata counts for every branch. A Worker that Workers Builds
  * has never built has none. Pages through the builds Cloudflare keeps (90 days), 200 at a time,
@@ -151,16 +161,7 @@ export const activeBuilds = async (
 
     const batch = found ?? [];
 
-    for (const build of batch) {
-      if (
-        build.status !== "stopped" &&
-        (branch === undefined ||
-          build.build_trigger_metadata?.branch === undefined ||
-          build.build_trigger_metadata.branch === branch)
-      ) {
-        active.push(build);
-      }
-    }
+    active.push(...batch.filter((build) => blocksBranch(build, branch)));
 
     if (batch.length < 200) {
       return active;
