@@ -103,9 +103,10 @@ const SHORT_ID = 7;
 // PostHog's source map plugin writes a snippet into every chunk that holds the chunk's id and, in
 // its default event mode, the release's id, and ends the chunk with a `//# chunkId=` comment. The
 // release changes with every commit, and the chunk id may be random, so a module's fingerprint
-// reads the snippet with both ids taken out.
+// reads the snippet with both ids taken out. The plugin writes the snippet without spaces whether
+// the build is minified or not; spaces are allowed anyway, in case a later step reformats it.
 const POSTHOG_IDS =
-  /(?<key>_posthogReleaseId\|\||_posthogChunkIds\[[\w$]+\]=)(?<quote>["'`])[^"'`\n]*\k<quote>/gu;
+  /(?<key>_posthogReleaseId\s*\|\|\s*|_posthogChunkIds\s*\[\s*[\w$]+\s*\]\s*=\s*)(?<quote>["'`])[^"'`\n]*\k<quote>/gu;
 
 const POSTHOG_CHUNK_ID_COMMENT = /^\/\/# chunkId=.*$/gmu;
 
