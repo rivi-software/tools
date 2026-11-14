@@ -1,6 +1,6 @@
 {
   "name": "@rivi-software/workers-bundle-check",
-  "version": "0.3.2",
+  "version": "1.0.0",
   "description": "Fails CI on what a Cloudflare Worker's build should not contain: a forbidden module or marker in the Worker, a source map its static assets would serve, or a value shaped like a secret",
   "keywords": [
     "cloudflare",
