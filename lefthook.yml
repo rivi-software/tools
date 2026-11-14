@@ -1,0 +1,31 @@
+# Git hooks, installed by lefthook's postinstall on `pnpm install` (outside CI). They run the
+# quick part of CI's Checks job on the staged files; `pnpm run verify` still runs all of it.
+# Skip them for one commit with `git commit --no-verify`, or `LEFTHOOK=0 git commit`.
+
+# Prints a summary, and a job's output only when it fails.
+output:
+  - summary
+  - failure
+
+pre-commit:
+  parallel: true
+  jobs:
+    # Formats the staged files with Oxfmt and stages the result. Oxfmt skips what
+    # oxfmt.config.ts ignores, such as Markdown and JSON.
+    - name: format
+      run: pnpm exec oxfmt --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+
+    - name: lint
+      glob: "*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
+      run: pnpm exec oxlint --no-error-on-unmatched-pattern {staged_files}
+
+    # Types reach across files, so this checks the whole repository, not only the staged files.
+    - name: typecheck
+      glob: "*.{ts,tsx,mts,cts}"
+      run: pnpm run check
+
+    # Reads the packages' manifests, LICENSE and README files, the root README and labeler.yml;
+    # it takes a fraction of a second, so it runs on every commit.
+    - name: manifests
+      run: pnpm run check:manifests
