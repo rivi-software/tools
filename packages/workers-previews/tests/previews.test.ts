@@ -121,6 +121,41 @@ describe(sweepPreviews, () => {
     expect(buildReads(fake.calls)).toBeLessThan(10);
   });
 
+  it("reads the builds again before it refuses a delete, so a build that finished since the read holds nothing up", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { fake, stale } = staleWorld(3);
+
+    const running: FakeBuild = {
+      build_uuid: "slow",
+      status: "running",
+      build_trigger_metadata: { branch: stale.at(-1) },
+    };
+
+    fake.state.builds[TAG].push(running);
+
+    // The build finishes while the sweep deletes the first branch.
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const response = await fake.fetch(input, init);
+
+      if (init?.method === "DELETE") {
+        running.status = "stopped";
+      }
+
+      return response;
+    };
+
+    const result = await sweepPreviews({
+      api: cloudflareApi({ accountId: ACCOUNT, token: TOKEN, fetch }),
+      worker: "app",
+      repository: onlyMain,
+      apply: true,
+    });
+
+    expect(result.failed).toStrictEqual([]);
+    expect(result.deleted.toSorted()).toStrictEqual(stale);
+    expect(buildReads(fake.calls)).toBe(2);
+  });
+
   it("keeps a Preview deployed after the repository was read, while the Previews were still being listed", async () => {
     const fake = fakeApis({
       workers: {

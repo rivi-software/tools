@@ -86,7 +86,8 @@ const SWEEP_BUILDS_MAX_AGE_MS = 30_000;
 /**
  * A build check that reads the Worker's builds again only once its last read is `maxAge`
  * milliseconds old, timed from when that read started; with the default 0, every check reads them.
- * Calls must not overlap.
+ * It refuses only on a read of its own, so a build that finished since an older read holds nothing
+ * up. Calls must not overlap.
  */
 const buildCheck = (target: PreviewsTarget, maxAge = 0): BuildCheck => {
   const builds = target.builds ?? target.api;
@@ -97,16 +98,26 @@ const buildCheck = (target: PreviewsTarget, maxAge = 0): BuildCheck => {
       return;
     }
 
-    const now = Date.now();
+    const read = async () => {
+      const startedAt = Date.now();
+      last = { startedAt, active: await readActiveBuilds(target, builds) };
 
-    if (last === undefined || now - last.startedAt >= maxAge) {
-      last = {
-        startedAt: now,
-        active: await readActiveBuilds(target, builds),
-      };
+      return last.active;
+    };
+
+    const cached =
+      last !== undefined && Date.now() - last.startedAt < maxAge
+        ? last.active
+        : undefined;
+
+    const blockedBy = (active: BuildInfo[]) =>
+      active.find((build) => blocksBranch(build, branch));
+
+    let blocking = blockedBy(cached ?? (await read()));
+
+    if (blocking && cached) {
+      blocking = blockedBy(await read());
     }
-
-    const blocking = last.active.find((build) => blocksBranch(build, branch));
 
     if (blocking) {
       throw new Error(
@@ -254,7 +265,8 @@ export interface SweepResult {
  * `apply` deletes the stale ones (`planSweep`). Reads the Previews, then the repository, both before
  * it deletes anything, and throws when either may be incomplete. One target's failed delete, such as a branch whose build is
  * running, does not stop the rest: the result lists it under `failed`. Checks every target against
- * one read of the Worker's Workers Builds, and reads them again once that read is 30 seconds old.
+ * one read of the Worker's Workers Builds, and reads them again once that read is 30 seconds old,
+ * and before a delete it would refuse.
  */
 export const sweepPreviews = async (
   target: PreviewsTarget & {

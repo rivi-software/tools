@@ -203,7 +203,7 @@ The sweep deletes nothing when:
 - GitHub's branches or open pull requests run past 100 pages of 100. It follows GitHub's `Link` header, and reads on after a full page even without one.
 - The branches lack the production branch: the token reads another repository, or `--production-branch` is wrong.
 
-`delete`, and the sweep for each branch, first ask the Workers Builds API for the Worker's builds of the last 90 days. A build of the branch that is queued, initializing or running stops the delete, and so does one that names no branch. A hashed name whose branch is unknown waits for every build of the Worker. A Worker that Workers Builds never built has none. `delete` reads the builds each time. `sweep --apply` reads them once, checks every branch against that list, and reads them again once the list is 30 seconds old.
+`delete`, and the sweep for each branch, first ask the Workers Builds API for the Worker's builds of the last 90 days. A build of the branch that is queued, initializing or running stops the delete, and so does one that names no branch. A hashed name whose branch is unknown waits for every build of the Worker. A Worker that Workers Builds never built has none. `delete` reads the builds each time. `sweep --apply` reads them once and checks every branch against that list. It reads them again whenever the list is 30 seconds old, and before it refuses a delete, so a build that finished since the read holds nothing up.
 
 ## From code
 
