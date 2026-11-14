@@ -67,7 +67,7 @@ const tab = ({
 }: TabOptions = {}) => {
   let time = LOADED_AT;
   const loads: (string | undefined)[] = [];
-  const state = { live, fetches: 0, ownFetches: 0 };
+  const state = { live, own, fetches: 0, ownFetches: 0 };
 
   const watch = createDeployWatch({
     current: "a",
@@ -82,7 +82,7 @@ const tab = ({
         : () => {
             state.ownFetches += 1;
 
-            return settled(own);
+            return settled(state.own ?? null);
           },
     now: () => time,
     storage,
@@ -565,15 +565,64 @@ describe(createDeployWatch, () => {
   });
 
   it("a tab whose build's copy is gone takes another build as new, and asks once", async () => {
-    // Gone (a host that keeps no replaced assets), unanswered, or another build's file.
+    // Gone (a host that keeps no replaced assets: a 404), or another build's file.
     const asked = { isNew: true, changed: true, fetches: 2, ownFetches: 1 };
     await expect(afterADeploy(null)).resolves.toStrictEqual(asked);
-    await expect(afterADeploy(new Error("offline"))).resolves.toStrictEqual(
-      asked
-    );
     await expect(
       afterADeploy({ id: "b", client: "c1" })
     ).resolves.toStrictEqual(asked);
+  });
+
+  it("a tab asks again for its build's copy after a request that failed", async () => {
+    // A deploy that changed only the server came before the tab's first read of `/build.json`,
+    // and the first request for the build's copy timed out.
+    const { watch, state, advance } = tab({
+      live: { id: "b", client: "c1", modules: { inbox: "i1" } },
+      own: new Error("timeout"),
+    });
+
+    let told = 0;
+    watch.subscribe(() => {
+      told += 1;
+    });
+    await expect(watch.check({ force: true })).resolves.toBeTruthy();
+    // A later check gets the copy: the live build has the page's code after all.
+    state.own = { id: "a", client: "c1", modules: { inbox: "i1" } };
+    advance(CHECK_SPACING_MS);
+    await expect(watch.check()).resolves.toBeFalsy();
+    expect({
+      isNew: watch.isNew(),
+      inbox: watch.changes("inbox"),
+      ownFetches: state.ownFetches,
+      told,
+    }).toStrictEqual({ isNew: false, inbox: false, ownFetches: 2, told: 2 });
+    // It has its own build's file now, and asks no more.
+    advance(CHECK_SPACING_MS);
+    await watch.check();
+    expect(state.ownFetches).toBe(2);
+  });
+
+  it("a tab asks for its build's copy three times at most, once a check", async () => {
+    const { watch, state, advance } = tab({
+      live: { id: "b", client: "c1" },
+      own: new Error("offline"),
+    });
+
+    await watch.check({ force: true });
+    // A check within the minute asks for nothing.
+    await watch.check();
+    expect(state.ownFetches).toBe(1);
+
+    for (let checks = 0; checks < 4; checks += 1) {
+      advance(CHECK_SPACING_MS);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each check comes a minute after the one before has settled
+      await expect(watch.check()).resolves.toBeTruthy();
+    }
+
+    expect({
+      fetches: state.fetches,
+      ownFetches: state.ownFetches,
+    }).toStrictEqual({ fetches: 5, ownFetches: 3 });
   });
 
   it("a module changes only when the newer build's fingerprint for it differs", async () => {

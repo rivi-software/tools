@@ -12,6 +12,8 @@ interface TabOptions {
   live?: object;
   /** What the page's build's own copy answers; null where the host no longer serves it. */
   own?: object | null;
+  /** The response to each request for the build's own copy, in place of `own`'s. */
+  ownResponse?: () => Response;
 }
 
 /** The fields the test sets on an event, beyond the ones `Event` itself has. */
@@ -29,6 +31,7 @@ const openTab = async ({
   id = "a",
   live = { id: "b" },
   own = null,
+  ownResponse,
 }: TabOptions = {}) => {
   const loads: (string | undefined)[] = [];
   const fetched: string[] = [];
@@ -78,6 +81,10 @@ const openTab = async ({
       return Response.json(live);
     }
 
+    if (ownResponse) {
+      return ownResponse();
+    }
+
     return own
       ? Response.json(own)
       : new Response("Not found", { status: 404 });
@@ -112,6 +119,58 @@ const startTab = async () => {
 
   return tab;
 };
+
+/**
+ * What a tab reads over a deploy that changed only the server, at its first read and three checks
+ * a minute apart after it, with its build's copy answering `answers` in turn (the last one from
+ * then on).
+ */
+const ownReads = async (answers: (() => Response)[]) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+
+  try {
+    const tab = await openTab({
+      live: { id: "b", client: "c1" },
+      ownResponse: () =>
+        (
+          (answers.length > 1 ? answers.shift() : answers[0]) ?? Response.error
+        )(),
+    });
+
+    tab.startDeployWatch();
+
+    for (const task of tab.later.splice(0)) {
+      task();
+    }
+
+    for (let checks = 1; checks <= 4; checks += 1) {
+      if (checks > 1) {
+        vi.setSystemTime(Date.now() + tab.CHECK_SPACING_MS);
+        tab.dispatch("focus");
+      }
+
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each check comes a minute after the one before has settled
+      await vi.waitFor(() =>
+        expect(tab.fetched.filter((url) => url === "/build.json")).toHaveLength(
+          checks
+        )
+      );
+      // The check settles, with its read of the build's copy if it asks for one.
+      // oxlint-disable-next-line eslint/no-await-in-loop -- as above
+      await sleep(10);
+    }
+
+    return {
+      ownReads: tab.fetched.filter((url) => url !== "/build.json").length,
+      isNew: tab.isNewBuildLive(),
+    };
+  } finally {
+    vi.useRealTimers();
+  }
+};
+
+/** The page's build's own copy, as a host that keeps it serves it. */
+const ownCopy = () => Response.json({ id: "a", client: "c1" });
 
 /** A stand-in for TanStack Router: `move` fires its `onBeforeNavigate` listeners. */
 const router = () => {
@@ -187,6 +246,27 @@ describe("the tab's watch", () => {
     ]);
     // The deploy changed only the server.
     expect(tab.isNewBuildLive()).toBeFalsy();
+  });
+
+  it("the tab asks again for its build's copy after a server error, but not after a 404", async () => {
+    await expect(
+      ownReads([() => new Response("Unavailable", { status: 503 }), ownCopy])
+    ).resolves.toStrictEqual({ ownReads: 2, isNew: false });
+    // A 404, or a host that answers every path with the app's page, says the copy is gone.
+    const gone = { ownReads: 1, isNew: true };
+    await expect(
+      ownReads([() => new Response("Not found", { status: 404 }), ownCopy])
+    ).resolves.toStrictEqual(gone);
+    await expect(
+      ownReads([
+        () => new Response("<!doctype html>", { status: 200 }),
+        ownCopy,
+      ])
+    ).resolves.toStrictEqual(gone);
+    // A server that keeps failing is asked three times in all.
+    await expect(
+      ownReads([() => new Response("Unavailable", { status: 503 })])
+    ).resolves.toStrictEqual({ ownReads: 3, isNew: true });
   });
 
   it("the first read waits until the browser is idle, where it can tell", async () => {

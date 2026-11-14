@@ -20,7 +20,7 @@
  *   idle after the page loads, while it most likely still names the page's build; once a deploy
  *   has replaced it, the tab reads the copy under its build's own name in the assets directory
  *   (`assets/deploy-watch-<id>.json`), where a host that keeps a replaced build's assets still
- *   serves it.
+ *   serves it. A request for it that failed is asked again at a later check, a few times.
  *
  * A failed hover or idle preload only triggers the check: the page reloads when it needs the
  * code, never under someone reading or typing. A chunk that fails while the page's build is
@@ -52,6 +52,10 @@ export const CHECK_SPACING_MS = 60_000;
 
 /** How often a visible tab checks on its own. */
 export const CHECK_INTERVAL_MS = 10 * 60_000;
+
+// How many times a tab asks for its own build's copy, at most once a check, while each request
+// fails without saying the copy is gone.
+const OWN_BUILD_ASKS = 3;
 
 // The longest the first read of the live file waits for the browser to be idle after the watch
 // starts, and how long it waits where the browser cannot say.
@@ -97,7 +101,8 @@ export interface DeployWatchDeps {
   fetchLive: () => Promise<BuildFile | null>;
   /**
    * The page's own build's file, from where it stays served after a deploy replaced the build;
-   * null when it is gone. Without it, the tab learns its own build only from the live file.
+   * null when it is gone. A rejection is a request that failed, and a later check asks again.
+   * Without it, the tab learns its own build only from the live file.
    */
   fetchOwn?: () => Promise<BuildFile | null>;
   now: () => number;
@@ -241,7 +246,9 @@ export const createDeployWatch = ({
   let unanswered = false;
   // The page's own build, as `/build.json` described it while it was live, or its own copy did.
   let own: BuildFile | null = null;
-  let askedOwn = false;
+  // How many times the tab asked for its own build's copy, and whether an answer said it is gone.
+  let ownAsks = 0;
+  let ownGone = false;
   // The newer build's file once one is live, the latest such answer.
   let live: BuildFile | null = null;
   // Whether the last check read a build with the page's own browser code; false when
@@ -291,18 +298,26 @@ export const createDeployWatch = ({
   };
 
   /**
-   * The page's own build's file, for a tab whose live file already names another build. Asked
-   * once at most: a host that keeps no replaced build's assets has none.
+   * The page's own build's file, for a tab whose live file already names another build. An
+   * answer is final: a host that keeps no replaced build's assets has none, and a file of another
+   * build is not the page's. A request that failed (a timeout, the network, a server error) says
+   * nothing, so a later check asks again, up to `OWN_BUILD_ASKS` times in all.
    */
   const readOwn = async (): Promise<BuildFile | null> => {
-    if (!fetchOwn || askedOwn) {
+    if (!fetchOwn || ownGone || ownAsks >= OWN_BUILD_ASKS) {
       return null;
     }
 
-    askedOwn = true;
-    const file = await fetchOwn().catch(() => null);
+    ownAsks += 1;
 
-    return file?.id === current ? file : null;
+    try {
+      const file = await fetchOwn();
+      ownGone = true;
+
+      return file?.id === current ? file : null;
+    } catch {
+      return null;
+    }
   };
 
   /**
@@ -349,6 +364,11 @@ export const createDeployWatch = ({
         if (answer && !own) {
           own = answer.id === current ? answer : await readOwn();
           changed = own !== null;
+
+          // A build taken as new only because the tab could not tell has the page's code after all.
+          if (live && sameCode(live)) {
+            live = null;
+          }
         }
 
         pending = null;
@@ -623,14 +643,47 @@ export const pageBuildId = (): string => {
   );
 };
 
-const fetchBuildFile = async (buildFile: string): Promise<BuildFile | null> => {
+// The statuses that say a file is not there, where asking again would get the same answer.
+const GONE_STATUSES = new Set([404, 410]);
+
+/**
+ * The build the file at `buildFile` describes; null when the answer is not one. With
+ * `untilGone`, null says the file is not there (a 404 or 410, or a body that is not a build
+ * file), and any other status that is not OK rejects, as a timeout or the network does.
+ */
+const fetchBuildFile = async (
+  buildFile: string,
+  { untilGone = false }: { untilGone?: boolean } = {}
+): Promise<BuildFile | null> => {
   const response = await fetch(buildFile, {
     cache: "no-store",
     credentials: "omit",
     signal: AbortSignal.timeout(10_000),
   });
 
-  return response.ok ? parseBuildFile(await response.json()) : null;
+  if (!response.ok) {
+    if (untilGone && !GONE_STATUSES.has(response.status)) {
+      throw new Error(`${buildFile} answered ${response.status}`);
+    }
+
+    return null;
+  }
+
+  if (!untilGone) {
+    return parseBuildFile(await response.json());
+  }
+
+  // A body that is not JSON (a host that answers every path with the app's page) is not a build
+  // file; a body cut off by the timeout or the network is a request that failed.
+  try {
+    return parseBuildFile(await response.json());
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return null;
+    }
+
+    throw error;
+  }
 };
 
 const sessionStore = (): SessionStore | null => {
@@ -694,7 +747,9 @@ export const startDeployWatch = ({ buildFile }: StartOptions = {}): void => {
   const tab = createDeployWatch({
     current,
     fetchLive: () => fetchBuildFile(file),
-    fetchOwn: ownFile ? () => fetchBuildFile(ownFile) : undefined,
+    fetchOwn: ownFile
+      ? () => fetchBuildFile(ownFile, { untilGone: true })
+      : undefined,
     now: Date.now,
     storage: sessionStore(),
     load: (href) =>
