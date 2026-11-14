@@ -1,5 +1,12 @@
 # @rivi-software/deploy-watch
 
+## 1.0.1
+
+### Patch Changes
+
+- d512fd0: A tab whose request for its own build's copy (`assets/deploy-watch-<id>.json`) fails now asks for it again at its next check, up to three times in all. Once it has the copy, a live build with the same browser code stops being new: the notice goes away and the next move to another page stays a client-side move. Only an answer that the copy is not there (a 404 or 410, or a body that is not a build file) is final. Before, any failed request was final, including a timeout, a network error or a 5xx. After a server-only deploy, a tab that missed `build.json` and then lost that one request took the deploy as new for the rest of its life: it showed the new-version notice, showed every module's notice, and loaded the whole page at its next move.
+- bca47fc: A module's fingerprint in `build.json` now reads the snippet that PostHog's source map plugin (`@posthog/rollup-plugin`) writes into every chunk without the release's id and the chunk's id, and leaves out its `//# chunkId=` comment. `useNewBuildNotice({ module })` then shows only once a deploy changed that module's code. Before, with `posthogSourcemaps` from `@rivi-software/posthog-tanstack-start` in the build, every deploy changed every module's fingerprint, so every module's notice showed after every deploy, a server-only commit included. The `client` fingerprint still changes with every deploy that uploads source maps, since the plugin renames every chunk; the README's "With PostHog's source map upload" says what that means for an app.
+
 ## 1.0.0
 
 ### Major Changes
