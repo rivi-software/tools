@@ -67,6 +67,8 @@ export interface MailEnv {
   SES_REGION?: string;
   SES_ACCESS_KEY_ID?: string;
   SES_SECRET_ACCESS_KEY?: string;
+  /** The configuration set `sendMail` and `sendRawMail` name to SES unless they are handed one. */
+  SES_CONFIGURATION_SET?: string;
 }
 
 /** SES's region and an IAM user's access key, as `sesConfig` reads them from the Worker's env. */
@@ -493,17 +495,26 @@ export const sesConfig = (env: MailEnv): SesConfig | null => {
 export const canSendMail = (env: MailEnv): boolean =>
   Boolean(sesConfig(env) || env.EMAIL);
 
-/** The transport `sendMail` and `sendRawMail` both choose, and the fallback from SES to the binding. */
+/**
+ * The transport `sendMail` and `sendRawMail` both choose, and the fallback from SES to the binding. SES gets the
+ * configuration set the caller named, else the env's; the binding has none.
+ */
 const sendThrough = async (
   env: MailEnv,
-  withSes: (config: SesConfig) => Promise<SentMail>,
+  options: { configurationSet?: string },
+  withSes: (
+    config: SesConfig,
+    sesOptions: { configurationSet?: string }
+  ) => Promise<SentMail>,
   withBinding: (binding: EmailBinding) => Promise<SentMail>
 ): Promise<SentMail> => {
   const config = sesConfig(env);
 
   if (config) {
     try {
-      return await withSes(config);
+      return await withSes(config, {
+        configurationSet: options.configurationSet ?? env.SES_CONFIGURATION_SET,
+      });
     } catch (error) {
       if (
         !(error instanceof MailError && error.status !== undefined && env.EMAIL)
@@ -588,12 +599,18 @@ export const sendWithBinding = async (
  * the address, a throttle) nothing went out, so the binding sends it instead and a `mail.ses_refused` line says
  * why. Without an answer from SES (the network, a timeout) the message may have gone out, and the error stands:
  * sending it again could deliver it twice. List mail never comes here (`sendWithSes`): Email Service takes
- * transactional mail only.
+ * transactional mail only. SES sends with the configuration set `configurationSet` names, else
+ * `env.SES_CONFIGURATION_SET`, and an empty one sends without; the binding has no configuration sets.
  */
-export const sendMail = (env: MailEnv, mail: Mail): Promise<SentMail> =>
+export const sendMail = (
+  env: MailEnv,
+  mail: Mail,
+  options: { configurationSet?: string } = {}
+): Promise<SentMail> =>
   sendThrough(
     env,
-    (config) => sendWithSes(config, mail),
+    options,
+    (config, sesOptions) => sendWithSes(config, mail, sesOptions),
     (binding) => sendWithBinding(binding, mail)
   );
 
@@ -717,12 +734,14 @@ export const sendRawWithBinding = async (
  * Sends a message the caller wrote out in full, such as signed or encrypted PGP/MIME, which has to go out byte for
  * byte as it was written; `sendMail` builds its message from fields and cannot carry one. The transport is chosen
  * as `sendMail` chooses it: SES when the Worker holds its key, else the `EMAIL` binding, and the binding when SES
- * answers with a refusal, never after an SES call that got no answer.
+ * answers with a refusal, never after an SES call that got no answer. The configuration set is chosen as for
+ * `sendMail`.
  */
 // oxlint-disable-next-line eslint/require-await -- without `async`, a refused sesOnlyHeaders would throw synchronously instead of rejecting the promise callers await
 export const sendRawMail = async (
   env: MailEnv,
-  mail: RawMail
+  mail: RawMail,
+  options: { configurationSet?: string } = {}
 ): Promise<SentMail> => {
   // Refused whichever transport is set up, so a bad header fails where only the binding sends (local development)
   // as it would through SES.
@@ -730,7 +749,8 @@ export const sendRawMail = async (
 
   return sendThrough(
     env,
-    (config) => sendRawWithSes(config, mail),
+    options,
+    (config, sesOptions) => sendRawWithSes(config, mail, sesOptions),
     (binding) => sendRawWithBinding(binding, mail)
   );
 };

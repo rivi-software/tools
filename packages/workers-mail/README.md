@@ -64,8 +64,9 @@ export default {
 | `EMAIL` | `send_email` binding | Cloudflare Email Service. |
 | `SES_REGION` | var | The AWS region SES sends from, such as `eu-west-1`. |
 | `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY` | secrets | The access key of an IAM user that may send ([below](#setting-up-ses)). |
+| `SES_CONFIGURATION_SET` | var, optional | The SES configuration set whose event destinations see the mail, such as its bounces and complaints. `sendMail(env, mail, { configurationSet })` names another for one message, and `configurationSet: ""` sends it without one. |
 
-SES is used once all three SES values are set; until then, or with any of them empty, the binding. A Worker that binds other names hands them over itself: `sendMail({ EMAIL: env.MAILER, SES_REGION: env.AWS_REGION, … }, mail)`.
+SES is used once its region and both secrets are set; until then, or with any of them empty, the binding. A Worker that binds other names hands them over itself: `sendMail({ EMAIL: env.MAILER, SES_REGION: env.AWS_REGION, … }, mail)`.
 
 ## How it works
 
@@ -85,12 +86,13 @@ What differs between the two transports, and what the package does about it:
 - **A To.** The Email SDK asks for one: a message to Cc or Bcc alone goes To its sender, as many mail clients do.
 - **Size.** Email Service takes up to 5 MiB, attachments included (25 MiB to the account's verified destination addresses), and 32 attachments; SES 40 MB, the base64 encoding counted. Both take 50 recipients.
 - **Tags.** SES message tags (`mail.tags`) come back on every SES event about the message; the binding has none and drops them.
+- **Configuration sets.** SES sends with the configuration set `sendMail` is handed, else `SES_CONFIGURATION_SET`, so its event destinations see the message. Email Service has no configuration sets, so a message the binding sends goes without one, and no SES event reports it.
 - **List mail.** Email Service takes transactional mail only, so newsletters and other list mail go through `sendWithSes`, which never falls back.
 - **Idempotency.** Neither has any; a caller that retries can deliver twice.
 
 ## Raw mail
 
-`sendMail` hands the transport fields, and the transport writes the message. A message that has to go out byte for byte as it was written, such as PGP/MIME (RFC 3156: `multipart/signed`, `multipart/encrypted`), whose signature covers the bytes of a part, goes through `sendRawMail(env, mail)` instead. It chooses the transport as `sendMail` does, hands a message SES refused to the binding on the same terms, and writes the same `mail.ses_refused` line.
+`sendMail` hands the transport fields, and the transport writes the message. A message that has to go out byte for byte as it was written, such as PGP/MIME (RFC 3156: `multipart/signed`, `multipart/encrypted`), whose signature covers the bytes of a part, goes through `sendRawMail(env, mail)` instead. It chooses the transport and the configuration set as `sendMail` does, hands a message SES refused to the binding on the same terms, and writes the same `mail.ses_refused` line.
 
 ```ts
 import { sendRawMail } from "@rivi-software/workers-mail";
@@ -119,10 +121,10 @@ From `@rivi-software/workers-mail`:
 
 | Export | What |
 | --- | --- |
-| `sendMail(env, mail)` | Transactional mail: SES when `env` holds its region and key, else `env.EMAIL`, and `env.EMAIL` when SES refuses the message ([How it works](#how-it-works)). Answers `SentMail`: the `transport`, the provider's `id` and the `messageId` header. |
+| `sendMail(env, mail, { configurationSet })` | Transactional mail: SES when `env` holds its region and key, else `env.EMAIL`, and `env.EMAIL` when SES refuses the message ([How it works](#how-it-works)). SES sends with `configurationSet`, else `env.SES_CONFIGURATION_SET`. Answers `SentMail`: the `transport`, the provider's `id` and the `messageId` header. |
 | `sendWithSes(config, mail, { configurationSet })` | SES alone, never the binding: list mail, which Email Service does not take, with the configuration set whose event destinations report its bounces and complaints. |
 | `sendWithBinding(binding, mail)` | The binding alone. |
-| `sendRawMail(env, mail)` | A message written out in full (`RawMail`), with `sendMail`'s choice of transport and fallback ([Raw mail](#raw-mail)). |
+| `sendRawMail(env, mail, { configurationSet })` | A message written out in full (`RawMail`), with `sendMail`'s choice of transport, fallback and configuration set ([Raw mail](#raw-mail)). |
 | `sendRawWithSes(config, mail, { configurationSet })` | A raw message through SES alone. |
 | `sendRawWithBinding(binding, mail)` | A raw message through the binding alone: one send per recipient. |
 | `canSendMail(env)`, `sesConfig(env)` | Whether a Worker can send at all; SES's region and key, or null while one of them is missing. |
@@ -170,10 +172,10 @@ Until these steps are done the binding sends everything, so they can wait until 
    }
    ```
 
-   `ses:FromAddress` takes wildcards (`*@<domain>`). A Worker that sends with a configuration set (`sendWithSes`) also needs `ses:SendEmail` on that set: add `arn:aws:ses:<region>:<account id>:configuration-set/<name>` to `Resource`.
+   `ses:FromAddress` takes wildcards (`*@<domain>`). A Worker that sends with a configuration set (`SES_CONFIGURATION_SET`, or `configurationSet` in any of the send functions) also needs `ses:SendEmail` on that set: make `Resource` a list with the set's ARN as well, `["arn:aws:ses:<region>:<account id>:identity/<domain>", "arn:aws:ses:<region>:<account id>:configuration-set/<name>"]`. Without it, SES refuses the mail with `AccessDeniedException`. `sendMail` and `sendRawMail` then send it through the binding, without the set; `sendWithSes` and `sendRawWithSes` fail with that `MailError`, and nothing goes out.
 4. **Check.** Send what the Worker sends (a sign-in link, a password reset) and look in its logs (Workers Logs, `wrangler tail`): no `mail.ses_refused` line means SES took the message. A line names SES's error type: `UnrecognizedClientException` or `SignatureDoesNotMatch` is the key, `AccessDeniedException` the IAM policy, `MessageRejected` with "not verified" the identity or the sandbox. Until it is fixed the binding keeps sending. Deleting the two secrets goes back to the binding.
 
-SES's account-level suppression list (SES → Configuration → Suppression list) keeps it from sending again to an address that bounced or complained; check that it covers both. `sendMail` uses no configuration set, so its mail has no event destination.
+SES's account-level suppression list (SES → Configuration → Suppression list) keeps it from sending again to an address that bounced or complained; check that it covers both. An event destination for those bounces and complaints, such as SNS or EventBridge, belongs to a configuration set: `SES_CONFIGURATION_SET` names one for `sendMail` and `sendRawMail`, and without it their mail has no event destination.
 
 ## Testing a Worker that sends
 

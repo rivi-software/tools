@@ -282,6 +282,42 @@ describe(sendMail, () => {
     });
   });
 
+  it("names the configuration set it is handed, else the env's", async () => {
+    const ses = fakeSes();
+    const env = { ...SES, SES_CONFIGURATION_SET: " transactional " };
+    await sendMail(env, MAIL);
+    await sendMail(env, MAIL, { configurationSet: "sign-in" });
+    // An empty set sends without one, whatever the env names.
+    await sendMail(env, MAIL, { configurationSet: "" });
+    await sendMail(SES, MAIL, { configurationSet: "sign-in" });
+    expect(
+      ses.requests.map((request) => request.body.ConfigurationSetName)
+    ).toStrictEqual(["transactional", "sign-in", undefined, "sign-in"]);
+  });
+
+  it("hands a message SES refused with a configuration set to the binding", async () => {
+    const { sent, EMAIL } = binding();
+
+    const ses = fakeSes(() =>
+      refusal(
+        403,
+        "AccessDeniedException",
+        "not authorized to perform ses:SendEmail"
+      )
+    );
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await sendMail({ EMAIL, ...SES }, MAIL, {
+      configurationSet: "transactional",
+    });
+
+    expect(ses.requests[0]?.body.ConfigurationSetName).toBe("transactional");
+    expect(result.transport).toBe("email-service");
+    expect(sent).toHaveLength(1);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
   it("keeps SES's refusal when there is no binding to fall back on", async () => {
     fakeSes(() =>
       refusal(400, "MessageRejected", "Email address is not verified.")

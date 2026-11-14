@@ -239,6 +239,42 @@ describe(sendRawMail, () => {
     });
   });
 
+  it("names the configuration set it is handed, else the env's", async () => {
+    const requests = fakeSes();
+    const env = { ...SES, SES_CONFIGURATION_SET: " transactional " };
+    await sendRawMail(env, MAIL);
+    await sendRawMail(env, MAIL, { configurationSet: "pgp" });
+    // An empty set sends without one, whatever the env names.
+    await sendRawMail(env, MAIL, { configurationSet: "" });
+    await sendRawMail(SES, MAIL, { configurationSet: "pgp" });
+    expect(
+      requests.map((request) => request.body.ConfigurationSetName)
+    ).toStrictEqual(["transactional", "pgp", undefined, "pgp"]);
+  });
+
+  it("hands a message SES refused with a configuration set to the binding", async () => {
+    const { sent, EMAIL } = binding();
+
+    const requests = fakeSes(() =>
+      refusal(
+        403,
+        "AccessDeniedException",
+        "not authorized to perform ses:SendEmail"
+      )
+    );
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await sendRawMail({ EMAIL, ...SES }, MAIL, {
+      configurationSet: "transactional",
+    });
+
+    expect(requests[0]?.body.ConfigurationSetName).toBe("transactional");
+    expect(result.transport).toBe("email-service");
+    expect(sent).toHaveLength(MAIL.recipients.length);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
   it("sends through the binding while SES has no key", async () => {
     const { sent, EMAIL } = binding();
     const fetch = vi.spyOn(globalThis, "fetch");
