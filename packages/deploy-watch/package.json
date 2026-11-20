@@ -40,13 +40,13 @@
     }
   },
   "devDependencies": {
-    "@posthog/rollup-plugin": "1.6.3",
+    "@posthog/rollup-plugin": "1.6.4",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "happy-dom": "21.0.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "vite": "8.3.6"
+    "vite": "8.3.8"
   },
   "keywords": [
     "deploy",
