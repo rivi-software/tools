@@ -1,0 +1,19 @@
+.changeset/minimatch-11-0-8.md
+  s_3eb9d34305ca92::t_e138c4b1e1a64b 1-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d5d8bb49dd75adb9c11bc5974232ce7fce05d844",
+  "prompts": {},
+  "sessions": {
+    "s_3eb9d34305ca92": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4d1fd1c8-36f9-46c4-b552-3116bad1a96d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Rik Visser <rik@rivi.software>"
+    }
+  }
+}
