@@ -57,15 +57,15 @@
     }
   },
   "devDependencies": {
-    "@posthog/rollup-plugin": "1.6.3",
+    "@posthog/rollup-plugin": "1.6.4",
     "@tanstack/react-router": "1.170.46",
-    "@tanstack/react-start": "1.169.4",
+    "@tanstack/react-start": "1.169.5",
     "happy-dom": "21.0.4",
-    "posthog-js": "1.447.3",
-    "posthog-node": "5.63.1",
+    "posthog-js": "1.448.0",
+    "posthog-node": "5.73.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "vite": "8.3.6"
+    "vite": "8.3.8"
   },
   "keywords": [
     "posthog",

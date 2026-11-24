@@ -249,7 +249,6 @@ export const nodeScript = (script: string, args: string[] = []): string[] => [
 
 /** True for an existing regular file; directories and missing paths are false. */
 export const fileExists = (filePath: string) =>
-  stat(filePath).then(
-    (info) => info.isFile(),
-    () => false
-  );
+  stat(filePath)
+    .then((info) => info.isFile())
+    .catch(() => false);
