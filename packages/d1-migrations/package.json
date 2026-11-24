@@ -40,7 +40,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "minimatch": "^11.0.5"
+    "minimatch": "^11.0.8"
   },
   "peerDependencies": {
     "wrangler": "^4.0.0"
