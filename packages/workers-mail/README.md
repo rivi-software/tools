@@ -136,7 +136,7 @@ From `@rivi-software/workers-mail`:
 | `sesMessageId(region, id)` | The `Message-ID` header SES gives the message it answered `id` for. |
 | Types | `Mail`, `RawMail`, `MailAddress`, `MailAttachment`, `MailEnv`, `MailTransport`, `SentMail`, `SesConfig`, `EmailBinding`. |
 
-A `Mail` has `from`, `to` (one address or a list), `cc`, `bcc` and `replyTo`, each address as `jane@example.com`, `Jane <jane@example.com>` or `{ email, name }`; a `subject`; `text` and/or `html`; `headers`; `attachments` as base64 (`disposition` `attachment`, or `inline` with the `contentId` the HTML names as `cid:`); and SES message `tags`.
+A `Mail` has `from`, `to` (one address or a list), `cc`, `bcc` and `replyTo`, each address as `jane@example.com`, `Jane <jane@example.com>` or `{ email, name }`. A string is one address: several go in an array (`to: ["jane@example.com", "bob@example.com"]`), and a string that holds more than one, such as `"jane@example.com, bob@example.com"`, or a line break is refused with a `MailError` whose `code` is `validation_error` before anything is sent. A quoted name may hold a comma or angle brackets (`"Doe, Jane" <jane@example.com>`). A `Mail` also has a `subject`; `text` and/or `html`; `headers`; `attachments` as base64 (`disposition` `attachment`, or `inline` with the `contentId` the HTML names as `cid:`); and SES message `tags`.
 
 A `RawMail` has the envelope's `from` and `recipients` as bare addresses, the message as `raw`, `sesOnlyHeaders` and SES message `tags`.
 

@@ -387,6 +387,52 @@ describe(sendMail, () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("refuses a string that holds more than one address or a line break, before anything is sent", async () => {
+    const { sent, EMAIL } = binding();
+    const ses = fakeSes();
+
+    const mails = [
+      { ...MAIL, to: "Jane <a@example.com>, Bob <b@example.com>" },
+      { ...MAIL, to: "a@example.com, b@example.com" },
+      { ...MAIL, cc: ["Jane, Bob <b@example.com>"] },
+      { ...MAIL, to: "jane@example.org\r\nBcc: eve@example.org" },
+      { ...MAIL, from: "Acme\r\nBcc: eve@example.org <support@example.com>" },
+      { ...MAIL, replyTo: { email: "a@example.com", name: "Acme\nSupport" } },
+    ];
+
+    const sends = [{ EMAIL }, { EMAIL, ...SES }].flatMap((env) =>
+      mails.map((mail) =>
+        expect(sendMail(env, mail)).rejects.toMatchObject({
+          name: "MailError",
+          code: "validation_error",
+          status: undefined,
+        })
+      )
+    );
+
+    await Promise.all(sends);
+    expect(sent).toStrictEqual([]);
+    expect(ses.spy).not.toHaveBeenCalled();
+  });
+
+  it("still sends one address to a string, a quoted name holding a comma or angle brackets", async () => {
+    const { sent, EMAIL } = binding();
+
+    await sendMail(
+      { EMAIL },
+      {
+        ...MAIL,
+        to: [
+          '"Doe, Jane" <jane@example.org>',
+          '"Acme <Ops>" <ops@example.org>',
+        ],
+      }
+    );
+    expect(sent[0]).toMatchObject({
+      to: ["jane@example.org", "ops@example.org"],
+    });
+  });
+
   it("refuses to send without SES or the binding", async () => {
     expect(canSendMail({})).toBeFalsy();
     expect(
