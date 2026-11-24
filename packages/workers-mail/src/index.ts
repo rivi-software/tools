@@ -152,6 +152,40 @@ export const addressParts = (
   return parseMailAddress(address);
 };
 
+// Whitespace (CR and LF among it), a comma or an angle bracket: a second address, or a header of its own.
+const NOT_ONE_EMAIL = /[\s,<>]/u;
+const LINE_BREAK = /[\r\n]/u;
+
+/**
+ * Refuses an address that is not one: a string such as `Jane <a@example.com>, Bob <b@example.com>` reads as Bob's
+ * address under the name `Jane <a@example.com>, Bob`, and a line break would write a header of its own. A quoted
+ * name may hold a comma or angle brackets. Several recipients go in an array.
+ */
+const refuseUnlessOneAddress = (
+  address: MailAddress,
+  transport: MailTransport
+): void => {
+  const { email, name } = addressParts(address);
+  let tooMany = NOT_ONE_EMAIL.test(email);
+
+  if (name && !isAddressParts(address)) {
+    const raw = address.trim();
+    const written = raw.slice(0, raw.lastIndexOf("<")).trim();
+
+    const quoted =
+      written.length > 1 && written.startsWith('"') && written.endsWith('"');
+
+    tooMany ||= !quoted && /[,<>]/u.test(name);
+  }
+
+  if (tooMany || (name !== null && LINE_BREAK.test(name))) {
+    throw new MailError(
+      "An address holds more than one address or a line break; several recipients go in an array.",
+      { transport, code: "validation_error" }
+    );
+  }
+};
+
 const bindingAddress = (
   address: MailAddress
 ): string | { email: string; name: string } => {
@@ -360,9 +394,24 @@ const sdkAttachment = (attachment: MailAttachment): SdkAttachment => {
 /** The Email SDK's message from ours: recipients and senders formatted for the transport, the parts as they are. */
 const envelope = (
   mail: Mail,
-  recipient: (address: MailAddress) => string,
-  sender: (address: MailAddress) => string | { email: string; name: string }
+  transport: MailTransport,
+  formatRecipient: (address: MailAddress) => string,
+  formatSender: (
+    address: MailAddress
+  ) => string | { email: string; name: string }
 ): EmailMessage => {
+  const recipient = (address: MailAddress) => {
+    refuseUnlessOneAddress(address, transport);
+
+    return formatRecipient(address);
+  };
+
+  const sender = (address: MailAddress) => {
+    refuseUnlessOneAddress(address, transport);
+
+    return formatSender(address);
+  };
+
   const list = (
     addresses: MailAddress | readonly MailAddress[] | undefined
   ) => {
@@ -558,7 +607,7 @@ export const sendWithSes = async (
   });
 
   const result = await send(adapter, "ses", {
-    ...envelope(mail, formatSesAddress, formatSesAddress),
+    ...envelope(mail, "ses", formatSesAddress, formatSesAddress),
     headers: mail.headers && sesHeaders(mail.headers),
     tags:
       mail.tags &&
@@ -584,7 +633,12 @@ export const sendWithBinding = async (
   });
 
   const result = await send(adapter, "email-service", {
-    ...envelope(mail, (a) => addressParts(a).email, bindingAddress),
+    ...envelope(
+      mail,
+      "email-service",
+      (a) => addressParts(a).email,
+      bindingAddress
+    ),
     headers:
       mail.headers &&
       Object.entries(mail.headers).map(([name, value]) => ({ name, value })),
