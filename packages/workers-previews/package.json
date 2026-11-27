@@ -34,7 +34,7 @@
     }
   },
   "devDependencies": {
-    "wrangler": "4.161.0"
+    "wrangler": "4.165.0"
   },
   "engines": {
     "node": ">=22"
